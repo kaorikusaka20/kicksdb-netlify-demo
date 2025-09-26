@@ -912,3 +912,156 @@ input:focus {
         padding: var(--spacing-xs);
     }
 }
+
+
+/* Contenedor principal de detalle - Layout mejorado */
+.detail-content {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 2rem;
+    align-items: start;
+    max-width: 1400px;
+    margin: 0 auto;
+}
+
+/* Contenedor de imagen - Tamaño uniforme 700x500 */
+.detail-image-section {
+    width: 100%;
+    max-width: 700px;
+    margin: 0 auto;
+}
+
+.detail-image {
+    width: 700px;
+    height: 500px;
+    object-fit: contain;
+    border-radius: 15px;
+    border: 1px solid var(--border-color);
+    background: var(--bg-secondary);
+    padding: 1rem;
+}
+
+/* Contenedor de tallas - NO más desplegable, ahora visible */
+.sizes-section {
+    margin: 2rem 0;
+}
+
+.sizes-container {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(110px, 1fr));
+    gap: 1rem;
+    max-height: none; /* Elimina scroll */
+    padding: 1.5rem;
+    border: 1px solid var(--border-color);
+    border-radius: 15px;
+    background: var(--bg-secondary);
+}
+
+/* Tallas individuales - Mejor visualización */
+.size-button {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    padding: 1rem 0.5rem;
+    background: var(--bg-tertiary);
+    border: 2px solid var(--border-color);
+    color: var(--text-primary);
+    border-radius: 10px;
+    cursor: pointer;
+    transition: all 0.3s ease;
+    min-height: 80px;
+    justify-content: center;
+}
+
+/* Tallas disponibles */
+.size-button:not(.unavailable):hover {
+    border-color: var(--accent-primary);
+    transform: translateY(-3px);
+    box-shadow: 0 5px 15px rgba(0, 212, 170, 0.3);
+}
+
+/* Tallas NO disponibles (agotadas) - Estilo claro */
+.size-button.unavailable {
+    background: var(--bg-primary);
+    color: var(--text-muted);
+    cursor: not-allowed;
+    opacity: 0.5;
+    border: 2px dashed var(--border-color);
+    text-decoration: line-through;
+}
+
+.size-button.unavailable .size-price {
+    text-decoration: line-through;
+}
+
+/* Talla seleccionada */
+.size-button.selected {
+    background: var(--accent-primary);
+    border-color: var(--accent-primary);
+    color: var(--bg-primary);
+    transform: scale(1.05);
+}
+
+/* Texto de precio en tallas */
+.size-price {
+    font-size: 0.9rem;
+    font-weight: 600;
+    margin-top: 0.3rem;
+    color: inherit;
+}
+
+/* Información de disponibilidad */
+.availability-info {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin: 1rem 0;
+    padding: 1rem;
+    background: var(--bg-secondary);
+    border-radius: 10px;
+    font-size: 0.9rem;
+}
+
+.available-count {
+    color: var(--success-color);
+    font-weight: 600;
+}
+
+.sold-out-count {
+    color: var(--error-color);
+    font-weight: 600;
+}
+
+/* Responsive para móviles */
+@media (max-width: 968px) {
+    .detail-content {
+        grid-template-columns: 1fr;
+        gap: 1.5rem;
+    }
+    
+    .detail-image {
+        width: 100%;
+        height: 400px;
+        max-width: 100%;
+    }
+    
+    .sizes-container {
+        grid-template-columns: repeat(auto-fit, minmax(100px, 1fr));
+    }
+}
+
+@media (max-width: 480px) {
+    .detail-image {
+        height: 300px;
+    }
+    
+    .sizes-container {
+        grid-template-columns: repeat(3, 1fr);
+        gap: 0.5rem;
+    }
+    
+    .size-button {
+        min-height: 70px;
+        padding: 0.8rem 0.3rem;
+    }
+}

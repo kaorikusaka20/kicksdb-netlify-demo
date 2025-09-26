@@ -210,24 +210,33 @@ function findBestMatch(products, targetSku) {
     }, { product: products[0], score: 0 }).product;
 }
 
-// Normalizar respuesta del plan Pro
+// Dentro de kicksdb.js, función normalizeProResponse
+
 function normalizeProResponse(data, sku) {
     console.log('Normalizing Pro response:', JSON.stringify(data, null, 2));
     
-    // Extraer información básica con mejores fallbacks
     const title = data.title || data.name || data.product_name || 'Anta Basketball Shoe';
     const image = data.image || data.thumbnail || data.main_picture_url || 'https://images.unsplash.com/photo-1542291026-7eec264c27ff?w=500&h=500&fit=crop';
     
-    // Precios en tiempo real - estructura mejorada
+    // Precio: intentar obtener de lowest_ask, retail_price, o de las tallas
     let regularPrice = extractBestPrice(data);
     const sizes = extractRealTimeSizes(data, regularPrice);
+    
+    // Si no hay tallas, usar el regularPrice, sino, usar el mínimo de las tallas disponibles para el precio de catálogo
+    let catalogPrice = regularPrice;
+    if (sizes.length > 0) {
+        const availableSizes = sizes.filter(s => s.available);
+        if (availableSizes.length > 0) {
+            catalogPrice = Math.min(...availableSizes.map(s => s.price));
+        }
+    }
     
     return {
         sku: sku,
         title: title,
         image: image,
         lastUpdated: new Date().toISOString(),
-        regularPrice: regularPrice,
+        regularPrice: catalogPrice, // Usamos el precio más bajo para el catálogo
         sizes: sizes,
         _source: 'KicksDB Pro',
         _features: {
@@ -238,30 +247,35 @@ function normalizeProResponse(data, sku) {
     };
 }
 
-// Extraer mejor precio disponible
 function extractBestPrice(data) {
-    // Priorizar precios en tiempo real
+    // Priorizar lowest_ask
     if (data.lowest_ask && !isNaN(parseFloat(data.lowest_ask))) {
         return parseFloat(data.lowest_ask);
     }
+    // Luego retail_price_cents
     if (data.retail_price_cents && !isNaN(data.retail_price_cents)) {
         return data.retail_price_cents / 100;
     }
+    // Luego retailPrice
     if (data.retailPrice && !isNaN(parseFloat(data.retailPrice))) {
         return parseFloat(data.retailPrice);
     }
-    
-    // Precios por tamaño
+    // Si no, buscar en las tallas el precio más bajo
     if (data.prices && typeof data.prices === 'object') {
-        const priceValues = Object.values(data.prices).flatMap(sizePrices => 
-            Object.values(sizePrices).filter(price => price > 0)
-        );
-        if (priceValues.length > 0) {
-            return Math.min(...priceValues);
+        let minPrice = Infinity;
+        Object.values(data.prices).forEach(sizePrices => {
+            Object.values(sizePrices).forEach(price => {
+                if (price > 0 && price < minPrice) {
+                    minPrice = price;
+                }
+            });
+        });
+        if (minPrice !== Infinity) {
+            return minPrice;
         }
     }
-    
-    return 120.00; // Fallback
+    // Fallback
+    return 120.00;
 }
 
 // Extraer tallas en tiempo real

@@ -257,7 +257,7 @@ body {
     padding: var(--spacing-md) 0;
 }
 
-/* Product Cards */
+/* Product Cards - CORRECCIÓN DE IMÁGENES */
 .product-card {
     background: var(--bg-secondary);
     border: 1px solid var(--border-color);
@@ -279,17 +279,23 @@ body {
     outline-offset: 2px;
 }
 
+/* CORRECCIÓN: Contenedor de imagen en catálogo */
 .product-image-container {
-    aspect-ratio: 1;
+    width: 100%;
+    height: 280px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: var(--bg-tertiary);
     overflow: hidden;
     position: relative;
-    height: 250px; /* Añadimos una altura fija para consistencia */
 }
 
 .product-image {
     width: 100%;
     height: 100%;
-    object-fit: cover; /* Esto asegura que la imagen cubra el contenedor sin distorsionarse */
+    object-fit: cover; /* Mantiene aspecto ratio y llena el contenedor */
+    transition: transform var(--transition-normal);
 }
 
 .product-card:hover .product-image {
@@ -322,7 +328,7 @@ body {
 
 .product-price {
     display: flex;
-    align-items: center;
+    flex-direction: column;
     gap: var(--spacing-xs);
 }
 
@@ -332,7 +338,12 @@ body {
     color: var(--accent-primary);
 }
 
-/* Product Detail */
+.available-sizes {
+    font-size: var(--font-size-sm);
+    color: var(--text-secondary);
+}
+
+/* Product Detail - CORRECCIÓN DE LAYOUT */
 .detail-container {
     max-width: 1000px;
     margin: 0 auto;
@@ -386,17 +397,22 @@ body {
     align-items: start;
 }
 
+/* CORRECCIÓN: Imagen de detalle más pequeña y proporcionada */
 .detail-image-section {
     position: sticky;
     top: 100px;
+    width: 100%;
+    max-width: 450px; /* Reducido de 700px */
+    margin: 0 auto;
 }
 
 .detail-image {
     width: 100%;
-    height: 500px; /* o el valor que desees */
-    object-fit: cover;
+    height: 320px; /* Reducido de 500px */
+    object-fit: cover; /* Cambiado a cover para mejor fit */
     border-radius: var(--radius-xl);
     border: 1px solid var(--border-color);
+    background: var(--bg-secondary);
 }
 
 .image-badge {
@@ -433,7 +449,7 @@ body {
     color: var(--accent-primary);
 }
 
-/* Sizes Section */
+/* Sizes Section - CORRECCIÓN MEJORADA */
 .sizes-section {
     margin-bottom: var(--spacing-xl);
 }
@@ -447,26 +463,37 @@ body {
 
 .sizes-container {
     display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(80px, 1fr));
+    grid-template-columns: repeat(auto-fit, minmax(110px, 1fr));
     gap: var(--spacing-sm);
+    padding: var(--spacing-md);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-lg);
+    background: var(--bg-secondary);
+    max-height: 400px;
+    overflow-y: auto;
 }
 
 .size-button {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
     padding: var(--spacing-sm);
-    background: var(--bg-secondary);
-    border: 1px solid var(--border-color);
+    background: var(--bg-tertiary);
+    border: 2px solid var(--border-color);
     color: var(--text-primary);
     border-radius: var(--radius-md);
     cursor: pointer;
     transition: all var(--transition-fast);
     font-size: var(--font-size-sm);
-    font-weight: 600;
-    text-align: center;
+    min-height: 70px;
+    position: relative;
 }
 
 .size-button:hover:not(:disabled) {
     background: var(--hover-bg);
     border-color: var(--accent-primary);
+    transform: translateY(-2px);
 }
 
 .size-button:focus {
@@ -478,13 +505,37 @@ body {
     background: var(--accent-primary);
     border-color: var(--accent-primary);
     color: var(--bg-primary);
+    transform: scale(1.05);
 }
 
+/* CORRECCIÓN: Tallas no disponibles - estilo claro */
 .size-button.unavailable {
-    background: var(--bg-tertiary);
+    background: var(--bg-primary);
     color: var(--text-muted);
     cursor: not-allowed;
-    opacity: 0.5;
+    opacity: 0.6;
+    border: 2px dashed var(--border-color);
+}
+
+.size-button.unavailable:hover {
+    transform: none;
+    border-color: var(--border-color);
+}
+
+.size-text {
+    font-weight: 600;
+    margin-bottom: 4px;
+}
+
+.size-price {
+    font-size: var(--font-size-xs);
+    font-weight: 500;
+    opacity: 0.9;
+}
+
+/* Precios tachados para tallas agotadas */
+.size-button.unavailable .size-price {
+    text-decoration: line-through;
 }
 
 /* Quantity Section */
@@ -689,6 +740,10 @@ body {
         gap: var(--spacing-md);
     }
     
+    .product-image-container {
+        height: 220px;
+    }
+    
     .detail-navigation {
         flex-direction: column;
         align-items: stretch;
@@ -701,6 +756,11 @@ body {
     
     .detail-image-section {
         position: static;
+        max-width: 100%;
+    }
+    
+    .detail-image {
+        height: 280px;
     }
     
     .detail-title {
@@ -712,7 +772,7 @@ body {
     }
     
     .sizes-container {
-        grid-template-columns: repeat(auto-fit, minmax(60px, 1fr));
+        grid-template-columns: repeat(auto-fit, minmax(90px, 1fr));
     }
     
     .toast-container {
@@ -730,8 +790,22 @@ body {
         grid-template-columns: 1fr;
     }
     
+    .product-image-container {
+        height: 200px;
+    }
+    
+    .detail-image {
+        height: 250px;
+    }
+    
     .sizes-container {
-        grid-template-columns: repeat(4, 1fr);
+        grid-template-columns: repeat(3, 1fr);
+        gap: var(--spacing-xs);
+    }
+    
+    .size-button {
+        min-height: 60px;
+        padding: var(--spacing-xs);
     }
     
     .detail-navigation {
@@ -760,308 +834,5 @@ input:focus {
         animation-duration: 0.01ms !important;
         animation-iteration-count: 1 !important;
         transition-duration: 0.01ms !important;
-    }
-}
-
-/* Contenedores de imagen fijos 700x500 */
-.product-image-container {
-    width: 100%;
-    height: 500px;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    background: var(--bg-tertiary);
-    overflow: hidden;
-    position: relative;
-}
-
-.product-image {
-    width: 700px;
-    height: 500px;
-    object-fit: contain;
-    transition: transform var(--transition-normal);
-}
-
-.detail-image-section {
-    width: 100%;
-    max-width: 700px;
-    margin: 0 auto;
-}
-
-.detail-image {
-    width: 700px;
-    height: 500px;
-    object-fit: contain;
-    border-radius: var(--radius-xl);
-    border: 1px solid var(--border-color);
-    background: var(--bg-secondary);
-}
-
-/* Mejoras para las tallas */
-.sizes-container {
-    display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(100px, 1fr));
-    gap: var(--spacing-sm);
-    max-height: 400px;
-    overflow-y: auto;
-    padding: var(--spacing-sm);
-    border: 1px solid var(--border-color);
-    border-radius: var(--radius-lg);
-    background: var(--bg-secondary);
-}
-
-.size-button {
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    padding: var(--spacing-sm);
-    background: var(--bg-tertiary);
-    border: 2px solid var(--border-color);
-    color: var(--text-primary);
-    border-radius: var(--radius-md);
-    cursor: pointer;
-    transition: all var(--transition-fast);
-    font-size: var(--font-size-sm);
-    min-height: 60px;
-    justify-content: center;
-}
-
-.size-button:hover:not(:disabled) {
-    border-color: var(--accent-primary);
-    transform: translateY(-2px);
-}
-
-.size-button:focus {
-    outline: 2px solid var(--accent-primary);
-    outline-offset: 2px;
-}
-
-.size-button.selected {
-    background: var(--accent-primary);
-    border-color: var(--accent-primary);
-    color: var(--bg-primary);
-    transform: scale(1.05);
-}
-
-.size-button.unavailable {
-    background: var(--bg-tertiary);
-    color: var(--text-muted);
-    cursor: not-allowed;
-    opacity: 0.6;
-    border-style: dashed;
-}
-
-.size-button.unavailable:hover {
-    border-color: var(--border-color);
-    transform: none;
-}
-
-.size-text {
-    font-weight: 600;
-    margin-bottom: 2px;
-}
-
-.size-price {
-    font-size: var(--font-size-xs);
-    opacity: 0.8;
-}
-
-.size-button.unavailable .size-price {
-    text-decoration: line-through;
-}
-
-.available-sizes {
-    font-size: var(--font-size-sm);
-    color: var(--text-secondary);
-    display: block;
-    margin-top: 4px;
-}
-
-/* Responsive */
-@media (max-width: 768px) {
-    .product-image-container,
-    .product-image {
-        height: 400px;
-    }
-    
-    .detail-image {
-        height: 400px;
-    }
-    
-    .sizes-container {
-        grid-template-columns: repeat(auto-fit, minmax(80px, 1fr));
-    }
-}
-
-@media (max-width: 480px) {
-    .product-image-container,
-    .product-image {
-        height: 300px;
-    }
-    
-    .detail-image {
-        height: 300px;
-    }
-    
-    .sizes-container {
-        grid-template-columns: repeat(3, 1fr);
-    }
-    
-    .size-button {
-        min-height: 50px;
-        padding: var(--spacing-xs);
-    }
-}
-
-
-/* Contenedor principal de detalle - Layout mejorado */
-.detail-content {
-    display: grid;
-    grid-template-columns: 1fr 1fr;
-    gap: 2rem;
-    align-items: start;
-    max-width: 1400px;
-    margin: 0 auto;
-}
-
-/* Contenedor de imagen - Tamaño uniforme 700x500 */
-.detail-image-section {
-    width: 100%;
-    max-width: 700px;
-    margin: 0 auto;
-}
-
-.detail-image {
-    width: 700px;
-    height: 500px;
-    object-fit: contain;
-    border-radius: 15px;
-    border: 1px solid var(--border-color);
-    background: var(--bg-secondary);
-    padding: 1rem;
-}
-
-/* Contenedor de tallas - NO más desplegable, ahora visible */
-.sizes-section {
-    margin: 2rem 0;
-}
-
-.sizes-container {
-    display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(110px, 1fr));
-    gap: 1rem;
-    max-height: none; /* Elimina scroll */
-    padding: 1.5rem;
-    border: 1px solid var(--border-color);
-    border-radius: 15px;
-    background: var(--bg-secondary);
-}
-
-/* Tallas individuales - Mejor visualización */
-.size-button {
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    padding: 1rem 0.5rem;
-    background: var(--bg-tertiary);
-    border: 2px solid var(--border-color);
-    color: var(--text-primary);
-    border-radius: 10px;
-    cursor: pointer;
-    transition: all 0.3s ease;
-    min-height: 80px;
-    justify-content: center;
-}
-
-/* Tallas disponibles */
-.size-button:not(.unavailable):hover {
-    border-color: var(--accent-primary);
-    transform: translateY(-3px);
-    box-shadow: 0 5px 15px rgba(0, 212, 170, 0.3);
-}
-
-/* Tallas NO disponibles (agotadas) - Estilo claro */
-.size-button.unavailable {
-    background: var(--bg-primary);
-    color: var(--text-muted);
-    cursor: not-allowed;
-    opacity: 0.5;
-    border: 2px dashed var(--border-color);
-    text-decoration: line-through;
-}
-
-.size-button.unavailable .size-price {
-    text-decoration: line-through;
-}
-
-/* Talla seleccionada */
-.size-button.selected {
-    background: var(--accent-primary);
-    border-color: var(--accent-primary);
-    color: var(--bg-primary);
-    transform: scale(1.05);
-}
-
-/* Texto de precio en tallas */
-.size-price {
-    font-size: 0.9rem;
-    font-weight: 600;
-    margin-top: 0.3rem;
-    color: inherit;
-}
-
-/* Información de disponibilidad */
-.availability-info {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    margin: 1rem 0;
-    padding: 1rem;
-    background: var(--bg-secondary);
-    border-radius: 10px;
-    font-size: 0.9rem;
-}
-
-.available-count {
-    color: var(--success-color);
-    font-weight: 600;
-}
-
-.sold-out-count {
-    color: var(--error-color);
-    font-weight: 600;
-}
-
-/* Responsive para móviles */
-@media (max-width: 968px) {
-    .detail-content {
-        grid-template-columns: 1fr;
-        gap: 1.5rem;
-    }
-    
-    .detail-image {
-        width: 100%;
-        height: 400px;
-        max-width: 100%;
-    }
-    
-    .sizes-container {
-        grid-template-columns: repeat(auto-fit, minmax(100px, 1fr));
-    }
-}
-
-@media (max-width: 480px) {
-    .detail-image {
-        height: 300px;
-    }
-    
-    .sizes-container {
-        grid-template-columns: repeat(3, 1fr);
-        gap: 0.5rem;
-    }
-    
-    .size-button {
-        min-height: 70px;
-        padding: 0.8rem 0.3rem;
     }
 }

@@ -1,5 +1,5 @@
 // KicksDB Real API Integration - Netlify Function
-// Handles real product data fetching with memory caching
+// ONLY uses real KicksDB data - NO FALLBACKS
 
 // In-memory cache with TTL (600s = 10 minutes)
 const cache = new Map();
@@ -26,12 +26,12 @@ function normalizeKicksDbResponse(data, sku) {
   
   // Extract basic product info with multiple fallbacks
   const title = data.title || data.name || data.product_name || data.productName || 'Unknown Product';
-  const image = data.image || data.thumbnail || data.imageUrl || data.media?.[0]?.imageUrl || data.images?.[0] || 'https://images.unsplash.com/photo-1542291026-7eec264c27ff?w=500&h=500&fit=crop';
+  const image = data.image || data.thumbnail || data.imageUrl || data.media?.[0]?.imageUrl || data.images?.[0];
   const lastUpdated = data.updated_at || data.lastUpdated || data.last_updated || new Date().toISOString();
   
   // Determine regular price (fallback hierarchy)
   // Priority: retailPrice > msrp > basePrice > lowestAsk > price > averagePrice
-  let regularPrice = 120; // fallback default
+  let regularPrice = null;
   
   if (data.retailPrice && !isNaN(parseFloat(data.retailPrice))) {
     regularPrice = parseFloat(data.retailPrice);
@@ -51,6 +51,10 @@ function normalizeKicksDbResponse(data, sku) {
   } else if (data.averagePrice && !isNaN(parseFloat(data.averagePrice))) {
     regularPrice = parseFloat(data.averagePrice);
     console.log('Using averagePrice:', regularPrice);
+  }
+  
+  if (!regularPrice) {
+    throw new Error('No valid price found in API response');
   }
   
   // Extract sizes information with multiple format support
@@ -84,28 +88,13 @@ function normalizeKicksDbResponse(data, sku) {
       price: parseFloat(bid.price || bid.amount || regularPrice),
       available: true
     }));
-  } else {
-    console.log('Using fallback common sizes');
-    // Fallback: create common sizes with regular price
-    const commonSizes = ['US 7', 'US 8', 'US 8.5', 'US 9', 'US 9.5', 'US 10', 'US 10.5', 'US 11', 'US 12'];
-    sizes = commonSizes.map(size => ({
-      size,
-      price: regularPrice,
-      available: true
-    }));
   }
   
-  // Filter out invalid sizes and ensure we have at least some sizes
+  // Filter out invalid sizes
   sizes = sizes.filter(size => size.size && size.size !== 'Unknown' && !isNaN(size.price));
   
   if (sizes.length === 0) {
-    console.log('No valid sizes found, creating default sizes');
-    const commonSizes = ['US 8', 'US 9', 'US 10', 'US 11'];
-    sizes = commonSizes.map(size => ({
-      size,
-      price: regularPrice,
-      available: true
-    }));
+    throw new Error('No valid sizes found in API response');
   }
   
   const normalized = {
@@ -199,45 +188,68 @@ export const handler = async (event, context) => {
   try {
     // Clean the SKU for the API call
     const cleanedSku = cleanSku(sku);
-    console.log(`Attempting to fetch product: ${cleanedSku}`);
+    console.log(`Attempting to fetch product from KicksDB: ${cleanedSku}`);
     
-    // Try multiple possible KicksDB endpoint patterns
+    // Try official KicksDB API endpoints based on their documentation
     const possibleEndpoints = [
-      `https://api.kicksdb.com/v1/product/${encodeURIComponent(cleanedSku)}`,
-      `https://api.kicksdb.com/product/${encodeURIComponent(cleanedSku)}`,
-      `https://kicksdb.com/api/v1/product/${encodeURIComponent(cleanedSku)}`,
-      `https://kicksdb.com/api/product/${encodeURIComponent(cleanedSku)}`,
+      // Standard API endpoint (most likely)
+      `https://api.kicks.dev/v1/products/${encodeURIComponent(cleanedSku)}`,
       `https://api.kicks.dev/v1/product/${encodeURIComponent(cleanedSku)}`,
-      `https://kicks.dev/api/product/${encodeURIComponent(cleanedSku)}`
+      // Alternative Standard API
+      `https://api.kicks.dev/standard/products/${encodeURIComponent(cleanedSku)}`,
+      `https://api.kicks.dev/standard/product/${encodeURIComponent(cleanedSku)}`,
+      // Unified API endpoint
+      `https://api.kicks.dev/unified/products/${encodeURIComponent(cleanedSku)}`,
+      `https://api.kicks.dev/unified/product/${encodeURIComponent(cleanedSku)}`,
+      // Search endpoint as fallback
+      `https://api.kicks.dev/v1/search?q=${encodeURIComponent(cleanedSku)}&limit=1`
     ];
     
     let response = null;
     let usedEndpoint = null;
-    let responseText = '';
+    let responseData = null;
     
     // Try each endpoint until one works
     for (const endpoint of possibleEndpoints) {
       try {
-        console.log(`Trying endpoint: ${endpoint}`);
+        console.log(`Trying KicksDB endpoint: ${endpoint}`);
         
         response = await fetch(endpoint, {
           method: 'GET',
           headers: {
             'Authorization': `Bearer ${apiKey}`,
             'X-API-Key': apiKey,
-            'apikey': apiKey, // Some APIs use lowercase
             'Content-Type': 'application/json',
             'User-Agent': 'Courts-Netlify-Function/1.0',
             'Accept': 'application/json'
           }
         });
         
+        console.log(`Response status: ${response.status} ${response.statusText}`);
+        
         if (response.ok) {
-          usedEndpoint = endpoint;
-          console.log(`Success with endpoint: ${endpoint}`);
-          break;
+          const responseText = await response.text();
+          console.log(`Raw response (first 500 chars):`, responseText.substring(0, 500));
+          
+          // Check if response is JSON
+          if (responseText.trim().startsWith('{') || responseText.trim().startsWith('[')) {
+            try {
+              responseData = JSON.parse(responseText);
+              usedEndpoint = endpoint;
+              console.log(`Success with endpoint: ${endpoint}`);
+              break;
+            } catch (jsonError) {
+              console.log(`JSON parse error with ${endpoint}:`, jsonError.message);
+              continue;
+            }
+          } else {
+            console.log(`Non-JSON response from ${endpoint}`);
+            continue;
+          }
         } else {
+          const errorText = await response.text();
           console.log(`Failed with ${endpoint}: ${response.status} - ${response.statusText}`);
+          console.log(`Error response:`, errorText.substring(0, 200));
         }
       } catch (endpointError) {
         console.log(`Error with ${endpoint}:`, endpointError.message);
@@ -245,62 +257,49 @@ export const handler = async (event, context) => {
       }
     }
     
-    if (!response || !response.ok) {
-      console.log('All endpoints failed, returning fallback data');
-      // Return a fallback response with realistic data instead of complete failure
-      const fallbackData = createFallbackData(cleanedSku, sku);
+    if (!responseData) {
+      console.error('All KicksDB endpoints failed');
       return {
-        statusCode: 200,
+        statusCode: 502,
         headers: {
           'Access-Control-Allow-Origin': '*',
           'Content-Type': 'application/json',
           'Cache-Control': 'no-store'
         },
-        body: JSON.stringify(fallbackData)
+        body: JSON.stringify({ 
+          error: 'Unable to connect to KicksDB API',
+          message: 'All API endpoints returned invalid responses. Please check your API key and SKU format.',
+          sku: cleanedSku,
+          endpoints_tried: possibleEndpoints.length
+        })
       };
     }
 
-    // Get response text first to check if it's HTML or JSON
-    responseText = await response.text();
-    console.log(`Raw response from ${usedEndpoint}:`, responseText.substring(0, 200) + '...');
-    
-    // Check if response looks like HTML (starts with <)
-    if (responseText.trim().startsWith('<')) {
-      console.error('API returned HTML instead of JSON, likely an error page');
-      const fallbackData = createFallbackData(cleanedSku, sku);
-      return {
-        statusCode: 200,
-        headers: {
-          'Access-Control-Allow-Origin': '*',
-          'Content-Type': 'application/json',
-          'Cache-Control': 'no-store'
-        },
-        body: JSON.stringify(fallbackData)
-      };
-    }
+    console.log(`Processing KicksDB response for ${cleanedSku}:`, JSON.stringify(responseData, null, 2));
 
-    // Try to parse JSON
-    let rawData;
-    try {
-      rawData = JSON.parse(responseText);
-    } catch (jsonError) {
-      console.error('Failed to parse JSON response:', jsonError.message);
-      const fallbackData = createFallbackData(cleanedSku, sku);
-      return {
-        statusCode: 200,
-        headers: {
-          'Access-Control-Allow-Origin': '*',
-          'Content-Type': 'application/json',
-          'Cache-Control': 'no-store'
-        },
-        body: JSON.stringify(fallbackData)
-      };
+    // Handle search endpoint response (array)
+    if (Array.isArray(responseData)) {
+      if (responseData.length === 0) {
+        return {
+          statusCode: 404,
+          headers: {
+            'Access-Control-Allow-Origin': '*',
+            'Content-Type': 'application/json',
+            'Cache-Control': 'no-store'
+          },
+          body: JSON.stringify({ 
+            error: 'Product not found',
+            sku: cleanedSku,
+            message: 'No products found matching this SKU'
+          })
+        };
+      }
+      // Use the first search result
+      responseData = responseData[0];
     }
-
-    console.log(`Raw KicksDB response for ${cleanedSku}:`, JSON.stringify(rawData, null, 2));
 
     // Normalize the response to our expected format
-    const normalizedData = normalizeKicksDbResponse(rawData, sku);
+    const normalizedData = normalizeKicksDbResponse(responseData, sku);
 
     // Cache the normalized data
     cache.set(cacheKey, {
@@ -321,71 +320,23 @@ export const handler = async (event, context) => {
     };
 
   } catch (error) {
-    console.error('Error fetching from KicksDB:', error);
-    
-    // Return a fallback response with realistic data instead of complete failure
-    const fallbackData = createFallbackData(cleanSku(sku), sku);
+    console.error('Error processing KicksDB response:', error);
     
     return {
-      statusCode: 200,
+      statusCode: 500,
       headers: {
         'Access-Control-Allow-Origin': '*',
         'Content-Type': 'application/json',
         'Cache-Control': 'no-store'
       },
-      body: JSON.stringify(fallbackData)
+      body: JSON.stringify({ 
+        error: 'API processing error',
+        message: error.message,
+        sku: cleanSku(sku)
+      })
     };
   }
 };
-
-// Helper function to create fallback data based on SKU
-function createFallbackData(cleanedSku, originalSku) {
-  // Map SKUs to proper product names and prices
-  const productMap = {
-    '112441113-13/1124D1113-13': {
-      name: 'Anta Kai 1 Jelly',
-      price: 139.99,
-      image: 'https://images.unsplash.com/photo-1606107557195-0e29a4b5b4aa?w=500&h=500&fit=crop'
-    },
-    '112531111S-3/8125C1111S-3/812531111S-3': {
-      name: 'Anta Kai 2 Triple Black',
-      price: 149.99,
-      image: 'https://images.unsplash.com/photo-1595950653106-6c9ebd614d3a?w=500&h=500&fit=crop'
-    },
-    '112511810S-1/1125A1810S-1/8125A1810S-1/112541810SF-1': {
-      name: 'Anta Kai Hélà White',
-      price: 159.99,
-      image: 'https://images.unsplash.com/photo-1549298916-b41d501d3772?w=500&h=500&fit=crop'
-    }
-  };
-
-  const productInfo = productMap[cleanedSku] || {
-    name: `Product ${cleanedSku}`,
-    price: 120.00,
-    image: 'https://images.unsplash.com/photo-1542291026-7eec264c27ff?w=500&h=500&fit=crop'
-  };
-
-  return {
-    sku: cleanedSku,
-    title: productInfo.name,
-    image: productInfo.image,
-    lastUpdated: new Date().toISOString(),
-    regularPrice: productInfo.price,
-    sizes: [
-      { size: 'US 7', price: productInfo.price - 10, available: true },
-      { size: 'US 8', price: productInfo.price, available: true },
-      { size: 'US 8.5', price: productInfo.price + 5, available: true },
-      { size: 'US 9', price: productInfo.price + 10, available: true },
-      { size: 'US 9.5', price: productInfo.price + 15, available: false },
-      { size: 'US 10', price: productInfo.price + 5, available: true },
-      { size: 'US 10.5', price: productInfo.price + 10, available: true },
-      { size: 'US 11', price: productInfo.price + 20, available: true },
-      { size: 'US 12', price: productInfo.price + 25, available: true }
-    ],
-    _fallback: true,
-    _note: 'Using fallback data - API connection failed'
-  };
-}
 
 // Cleanup old cache entries periodically (runs every 10 minutes)
 setInterval(() => {

@@ -1,0 +1,119 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>COURTS - Sneaker Catalog</title>
+    <link rel="stylesheet" href="styles.css">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+</head>
+<body>
+    <!-- Navigation Bar -->
+    <nav class="navbar">
+        <div class="nav-container">
+            <div class="nav-brand">
+                <h1>COURTS</h1>
+            </div>
+            <div class="nav-actions">
+                <button id="refresh-btn" class="refresh-button" title="Actualizar datos">
+                    <span class="refresh-icon">↻</span>
+                    <span class="refresh-text">Actualizar ahora</span>
+                </button>
+                <div class="currency-selector">
+                    <label for="currency-select" class="sr-only">Seleccionar moneda</label>
+                    <select id="currency-select" class="currency-select">
+                        <option value="USD">USD ($)</option>
+                        <option value="EUR">EUR (€)</option>
+                        <option value="GBP">GBP (£)</option>
+                        <option value="JPY">JPY (¥)</option>
+                        <option value="CNY">CNY (¥)</option>
+                        <option value="PEN">PEN (S/)</option>
+                    </select>
+                </div>
+            </div>
+        </div>
+    </nav>
+
+    <!-- Main Content -->
+    <main class="main-content">
+        <!-- Status Messages -->
+        <div id="status" class="status-container" style="display: none;">
+            <div class="status-message"></div>
+        </div>
+
+        <!-- Home View (Catalog) -->
+        <div id="view-home" class="view active">
+            <div class="catalog-header">
+                <h2>Catálogo de Sneakers</h2>
+                <p class="catalog-subtitle">Descubre nuestra colección exclusiva</p>
+            </div>
+            
+            <div id="product-grid" class="product-grid">
+                <!-- Products will be rendered here -->
+            </div>
+        </div>
+
+        <!-- Product Detail View -->
+        <div id="view-detail" class="view">
+            <div class="detail-container">
+                <button id="back-btn" class="back-button">
+                    <span class="back-icon">←</span>
+                    <span>Volver al Home</span>
+                </button>
+                
+                <div class="detail-content">
+                    <div class="detail-image-section">
+                        <img id="detail-image" class="detail-image" alt="Product Image" />
+                    </div>
+                    
+                    <div class="detail-info-section">
+                        <h1 id="detail-title" class="detail-title"></h1>
+                        
+                        <div class="price-section">
+                            <span class="current-price" id="detail-price">$0.00</span>
+                            <span class="currency-symbol" id="detail-currency"></span>
+                        </div>
+                        
+                        <div class="sizes-section">
+                            <h3>Tallas disponibles</h3>
+                            <div id="sizes-container" class="sizes-container">
+                                <!-- Size buttons will be rendered here -->
+                            </div>
+                        </div>
+                        
+                        <div class="quantity-section">
+                            <label for="quantity-input">Cantidad:</label>
+                            <input type="number" id="quantity-input" class="quantity-input" value="1" min="1" max="10">
+                        </div>
+                        
+                        <button id="add-to-cart-btn" class="add-to-cart-button" disabled>
+                            <span class="cart-icon">🛒</span>
+                            <span>Agregar al carrito</span>
+                        </button>
+                        
+                        <div class="meta-info">
+                            <p class="last-updated">
+                                <span class="label">Última actualización:</span>
+                                <span id="last-updated-time">--</span>
+                            </p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </main>
+
+    <!-- Toast Notifications -->
+    <div id="toast-container" class="toast-container"></div>
+
+    <!-- Loading Overlay -->
+    <div id="loading-overlay" class="loading-overlay">
+        <div class="loading-spinner"></div>
+        <p class="loading-text">Cargando productos...</p>
+    </div>
+
+    <script src="app.js"></script>
+</body>
+</html>

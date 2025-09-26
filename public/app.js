@@ -69,7 +69,7 @@ const elements = {
 
 // Utility Functions
 function formatPrice(price, currency = __CURRENCY) {
-    if (price === 0 || price === null) return 'No disponible';
+    if (price === 0 || price === null || price === undefined) return 'No disponible';
     
     const convertedPrice = price * EXCHANGE[currency];
     const symbol = CURRENCY_SYMBOLS[currency];
@@ -237,6 +237,7 @@ function renderCatalog() {
         if (!data) return;
 
         const displayPrice = data.regularPrice;
+        const availableSizes = data.sizes.filter(s => s.available).length;
 
         const card = document.createElement('div');
         card.className = 'product-card';
@@ -252,7 +253,7 @@ function renderCatalog() {
                 <h3 class="product-name">${data.title}</h3>
                 <div class="product-price">
                     <span class="price-amount">${formatPrice(displayPrice)}</span>
-                    <span class="available-sizes">${data.sizes.filter(s => s.available).length} tallas disponibles</span>
+                    <span class="available-sizes">${availableSizes} tallas disponibles</span>
                 </div>
             </div>
         `;
@@ -286,11 +287,8 @@ function renderProductDetail(sku) {
         elements.imageBadge.style.display = 'none';
     }
     
-   // CORRECCIÓN: Usar el precio de la primera talla disponible o regularPrice
-    const firstAvailableSize = data.sizes.find(size => size.available);
-    const initialPrice = firstAvailableSize ? firstAvailableSize.price : data.regularPrice;
-    
-    updateDetailPrice(initialPrice);
+    // CORRECCIÓN: Mostrar precio inicial como "Selecciona una talla"
+    updateDetailPrice(null, true);
     
     // Renderizar TODAS las tallas (disponibles y no disponibles)
     renderAllSizes(data.sizes);
@@ -322,7 +320,7 @@ function renderAllSizes(sizes) {
         
         // Mostrar tooltip para tallas no disponibles
         if (!sizeData.available) {
-            button.title = 'Talla no disponible';
+            button.title = 'Talla agotada - Sin stock';
         }
         
         if (sizeData.available) {
@@ -342,10 +340,10 @@ function selectSize(sizeData) {
     });
     
     // Agregar selección actual
-    event.target.classList.add('selected');
+    event.target.closest('.size-button').classList.add('selected');
     
-    // Actualizar precio con el de la talla seleccionada
-    updateDetailPrice(sizeData.price);
+    // CORRECCIÓN: Actualizar precio con el de la talla seleccionada
+    updateDetailPrice(sizeData.price, false);
     
     // Habilitar botón de agregar al carrito
     elements.addToCartBtn.disabled = false;
@@ -353,16 +351,24 @@ function selectSize(sizeData) {
     showToast(`Talla ${sizeData.size} seleccionada - ${formatPrice(sizeData.price)}`, 'info');
 }
 
-function updateDetailPrice(price) {
-    // CORRECCIÓN: Mostrar "No disponible" para precios 0 o inválidos
+function updateDetailPrice(price, isInitial = false) {
+    if (isInitial) {
+        elements.detailPrice.textContent = 'Selecciona una talla';
+        elements.detailPrice.style.color = 'var(--text-secondary)';
+        elements.detailPrice.style.fontSize = 'var(--font-size-xl)';
+        return;
+    }
+    
     if (price === 0 || price === null || price === undefined) {
-        elements.detailPrice.textContent = 'No disponible';
-        elements.detailPrice.style.color = var(--error-color);
+        elements.detailPrice.textContent = 'Agotado';
+        elements.detailPrice.style.color = 'var(--error-color)';
     } else {
         elements.detailPrice.textContent = formatPrice(price);
-        elements.detailPrice.style.color = '';
+        elements.detailPrice.style.color = 'var(--accent-primary)';
+        elements.detailPrice.style.fontSize = '2.5rem';
     }
 }
+
 // Navigation Functions
 function goHome() {
     elements.homeView.classList.add('active');
@@ -384,9 +390,12 @@ function handleCurrencyChange() {
     if (elements.homeView.classList.contains('active')) {
         renderCatalog();
     } else if (__SELECTED_PRODUCT_SKU) {
+        const currentPrice = __SELECTED_SIZE ? __SELECTED_SIZE.price : null;
+        updateDetailPrice(currentPrice, !__SELECTED_SIZE);
+        
+        // Re-renderizar tallas con nuevos precios
         const data = __PRODUCT_CACHE[__SELECTED_PRODUCT_SKU];
-        const currentPrice = __SELECTED_SIZE ? __SELECTED_SIZE.price : data.regularPrice;
-        updateDetailPrice(currentPrice);
+        renderAllSizes(data.sizes);
     }
     
     showToast(`Moneda cambiada a ${__CURRENCY}`, 'info');

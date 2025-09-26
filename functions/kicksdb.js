@@ -37,20 +37,21 @@ export const handler = async (event) => {
         };
     }
 
-    const { sku, market = 'US' } = event.queryStringParameters || {};
+    const { sku, id, market = 'US' } = event.queryStringParameters || {};
     
-    if (!sku) {
+    if (!sku && !id) {
         return {
             statusCode: 400,
             headers: {
                 'Access-Control-Allow-Origin': '*',
                 'Content-Type': 'application/json'
             },
-            body: JSON.stringify({ error: 'SKU parameter is required' })
+            body: JSON.stringify({ error: 'SKU or ID parameter is required' })
         };
     }
 
-    const cacheKey = getCacheKey(sku, market);
+    const queryParam = id || sku;
+    const cacheKey = getCacheKey(queryParam, market);
     const cachedData = cache.get(cacheKey);
 
     if (isCacheValid(cachedData)) {
@@ -87,12 +88,17 @@ export const handler = async (event) => {
     }
 
     try {
-        console.log(`Fetching real-time StockX data for SKU: ${sku}`);
+        console.log(`Fetching real-time StockX data for: ${id ? `ID: ${id}` : `SKU: ${sku}`}`);
         
-        // ENDPOINT para buscar productos por SKU en StockX
-        const searchEndpoint = `https://api.kicks.dev/v3/stockx/products?query=${encodeURIComponent(sku)}&limit=5`;
+        // USAR ID si está disponible, sino SKU
+        let searchEndpoint;
+        if (id && id !== 'TBD-PRODUCT-ID-2' && id !== 'TBD-PRODUCT-ID-3') {
+            searchEndpoint = `https://api.kicks.dev/v3/stockx/products/${id}`;
+        } else {
+            searchEndpoint = `https://api.kicks.dev/v3/stockx/products?query=${encodeURIComponent(sku)}&limit=5`;
+        }
         
-        console.log(`Trying endpoint: ${searchEndpoint}`);
+        console.log(`Using endpoint: ${searchEndpoint}`);
         
         const response = await fetch(searchEndpoint, {
             method: 'GET',
@@ -109,27 +115,32 @@ export const handler = async (event) => {
             const data = await response.json();
             console.log('StockX API response received');
             
-            if (data.data && data.data.length > 0) {
-                // Encontrar el producto que mejor coincida con el SKU
+            // MANEJAR respuesta directa por ID o búsqueda por SKU
+            let productData;
+            if (data.product) {
+                // Respuesta directa por ID
+                productData = normalizeStockXResponse(data, queryParam);
+            } else if (data.data && data.data.length > 0) {
+                // Búsqueda por SKU
                 const bestMatch = findBestMatch(data.data, sku);
-                const productData = normalizeStockXResponse(bestMatch, sku);
-                
-                cache.set(cacheKey, {
-                    data: productData,
-                    timestamp: Date.now()
-                });
-                
-                return {
-                    statusCode: 200,
-                    headers: {
-                        'Access-Control-Allow-Origin': '*',
-                        'Content-Type': 'application/json'
-                    },
-                    body: JSON.stringify(productData)
-                };
+                productData = normalizeStockXResponse({product: bestMatch}, queryParam);
             } else {
-                throw new Error('No products found in StockX search results');
+                throw new Error('No product data found in response');
             }
+            
+            cache.set(cacheKey, {
+                data: productData,
+                timestamp: Date.now()
+            });
+            
+            return {
+                statusCode: 200,
+                headers: {
+                    'Access-Control-Allow-Origin': '*',
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify(productData)
+            };
         } else {
             throw new Error(`StockX API returned ${response.status}`);
         }
@@ -137,8 +148,8 @@ export const handler = async (event) => {
     } catch (error) {
         console.error('Error fetching from StockX API:', error);
         
-        // Fallback a datos mock basados en el JSON que proporcionaste
-        const productData = createStockXMockData(sku);
+        // Fallback a datos mock
+        const productData = createStockXMockData(queryParam);
         
         cache.set(cacheKey, {
             data: productData,
@@ -175,61 +186,82 @@ function findBestMatch(products, targetSku) {
 }
 
 function normalizeStockXResponse(data, sku) {
-    console.log('Normalizando respuesta de StockX para precios y tallas...');
+    console.log('Normalizando respuesta REAL de StockX API...');
     
-    // 1. Precio Base CORREGIDO: Usar precio mínimo disponible
-    const basePrice = data.min_price || getOfficialPriceBySku(sku);
-
-    // 2. Tallas CORREGIDAS: Extraer de variants con disponibilidad real
-    const sizes = extractSizesFromStockXVariants(data.variants, sku);
+    // 1. CORRECCIÓN: Usar estructura del JSON real
+    const product = data.product || data;
     
-    // 3. Imagen con tamaño específico optimizado para la UI
-    const image = data.image ? `${data.image}?fit=fill&bg=FFFFFF&w=700&h=500` : 
-                              getProductImageBySku(sku);
+    // 2. Precio Base: usar min_price del producto
+    const basePrice = product.min_price || getOfficialPriceBySku(sku);
+    
+    // 3. Extraer tallas REALES de variants
+    const sizes = extractRealStockXVariants(product.variants, sku);
+    
+    // 4. Imagen REAL de StockX
+    const image = product.image || getProductImageBySku(sku);
 
     return {
-        sku: sku,
-        title: data.title || getProductNameBySku(sku),
+        sku: product.sku || sku,
+        title: product.title || getProductNameBySku(sku),
         image: image,
-        lastUpdated: data.updated_at || new Date().toISOString(),
+        lastUpdated: product.updated_at || new Date().toISOString(),
         regularPrice: basePrice,
         sizes: sizes,
-        _source: 'StockX API Real',
+        _source: 'StockX API - Datos Reales',
         _features: {
             realTimeData: true,
             availableSizes: sizes.filter(s => s.available).length,
             totalSizes: sizes.length,
-            priceConsistency: 'Real API Data'
+            minPrice: product.min_price,
+            maxPrice: product.max_price,
+            weeklyOrders: product.weekly_orders
         }
     };
 }
 
-function extractSizesFromStockXVariants(variants, sku) {
+function extractRealStockXVariants(variants, sku) {
     if (!variants || !Array.isArray(variants)) {
+        console.log('No variants found, using fallback data');
         return generateRealisticSizesWithPrices(sku);
     }
     
+    console.log(`Processing ${variants.length} real variants from StockX API`);
     const sizes = [];
     
     variants.forEach(variant => {
-        // CORRECCIÓN: Disponibilidad basada en lowest_ask > 0 Y total_asks > 0
-        const available = variant.lowest_ask > 0 && variant.total_asks > 0;
-        // CORRECCIÓN: Precio REAL de la talla
-        const sizePrice = available ? variant.lowest_ask : 0;
+        // DATOS REALES del JSON: lowest_ask y total_asks
+        const lowestAsk = variant.lowest_ask || 0;
+        const totalAsks = variant.total_asks || 0;
+        
+        // Disponibilidad REAL: debe tener precio Y ofertas
+        const available = lowestAsk > 0 && totalAsks > 0;
+        
+        console.log(`Talla ${variant.size}: ${lowestAsk}, ${totalAsks} offers, available: ${available}`);
         
         sizes.push({
             size: `US ${variant.size}`,
-            price: parseFloat(sizePrice.toFixed(2)),
+            price: available ? parseFloat(lowestAsk.toFixed(2)) : 0,
             available: available,
-            originalData: {
-                lowest_ask: variant.lowest_ask,
-                total_asks: variant.total_asks,
-                size_type: variant.size_type
+            realData: {
+                lowest_ask: lowestAsk,
+                total_asks: totalAsks,
+                previous_lowest_ask: variant.previous_lowest_ask,
+                sales_15_days: variant.sales_count_15_days,
+                sales_30_days: variant.sales_count_30_days,
+                sales_60_days: variant.sales_count_60_days
             }
         });
     });
     
-    return sizes.length > 0 ? sizes : generateRealisticSizesWithPrices(sku);
+    // Ordenar por talla
+    sizes.sort((a, b) => {
+        const sizeA = parseFloat(a.size.replace('US ', ''));
+        const sizeB = parseFloat(b.size.replace('US ', ''));
+        return sizeA - sizeB;
+    });
+    
+    console.log(`Processed ${sizes.length} sizes, ${sizes.filter(s => s.available).length} available`);
+    return sizes;
 }
 
 // CORRECCIÓN: Generar tallas realistas con precios variables por SKU

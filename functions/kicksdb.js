@@ -212,31 +212,30 @@ function findBestMatch(products, targetSku) {
 
 // Dentro de kicksdb.js, función normalizeProResponse
 
+// Normalizar respuesta del plan Pro
 function normalizeProResponse(data, sku) {
     console.log('Normalizing Pro response:', JSON.stringify(data, null, 2));
     
-    const title = data.title || data.name || data.product_name || 'Anta Basketball Shoe';
-    const image = data.image || data.thumbnail || data.main_picture_url || 'https://images.unsplash.com/photo-1542291026-7eec264c27ff?w=500&h=500&fit=crop';
+    // Extraer información básica
+    const title = data.title || data.name || data.product_name || getProductNameBySku(sku);
+    let image = data.image || data.thumbnail || data.main_picture_url || getProductImageBySku(sku);
     
-    // Precio: intentar obtener de lowest_ask, retail_price, o de las tallas
-    let regularPrice = extractBestPrice(data);
-    const sizes = extractRealTimeSizes(data, regularPrice);
-    
-    // Si no hay tallas, usar el regularPrice, sino, usar el mínimo de las tallas disponibles para el precio de catálogo
-    let catalogPrice = regularPrice;
-    if (sizes.length > 0) {
-        const availableSizes = sizes.filter(s => s.available);
-        if (availableSizes.length > 0) {
-            catalogPrice = Math.min(...availableSizes.map(s => s.price));
-        }
+    // Si la imagen es de StockX, ya tiene los parámetros de tamaño. Si no, añadimos los parámetros de Netlify.
+    if (image.includes('http') && !image.includes('stockx.com')) {
+        image += '?nf_resize=fit&w=700&h=500';
     }
+    
+    // Precios oficiales específicos para cada producto
+    const officialPrice = getOfficialPriceBySku(sku);
+    // Extraer tallas de los variants
+    const sizes = extractSizesFromVariants(data.variants, officialPrice);
     
     return {
         sku: sku,
         title: title,
         image: image,
         lastUpdated: new Date().toISOString(),
-        regularPrice: catalogPrice, // Usamos el precio más bajo para el catálogo
+        regularPrice: officialPrice,
         sizes: sizes,
         _source: 'KicksDB Pro',
         _features: {
@@ -247,6 +246,32 @@ function normalizeProResponse(data, sku) {
     };
 }
 
+// Extraer tallas desde los variants
+function extractSizesFromVariants(variants, basePrice) {
+    if (!variants || !Array.isArray(variants)) {
+        // Si no hay variants, generar tallas por defecto
+        return generateOfficialSizes(basePrice);
+    }
+    
+    const sizes = [];
+    
+    variants.forEach(variant => {
+        // La talla puede venir como "8" o "8.5", etc. 
+        // En el JSON de ejemplo, la talla está en variant.size y es un string numérico.
+        const size = variant.size;
+        // El precio es el lowest_ask, si es 0, no disponible
+        const price = variant.lowest_ask > 0 ? variant.lowest_ask : basePrice;
+        const available = variant.lowest_ask > 0;
+        
+        sizes.push({
+            size: `US ${size}`,
+            price: parseFloat(price),
+            available: available
+        });
+    });
+    
+    return sizes;
+}
 function extractBestPrice(data) {
     // Priorizar lowest_ask
     if (data.lowest_ask && !isNaN(parseFloat(data.lowest_ask))) {

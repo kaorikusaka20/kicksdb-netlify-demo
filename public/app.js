@@ -286,8 +286,11 @@ function renderProductDetail(sku) {
         elements.imageBadge.style.display = 'none';
     }
     
-    // Precio inicial
-    updateDetailPrice(data.regularPrice);
+   // CORRECCIÓN: Usar el precio de la primera talla disponible o regularPrice
+    const firstAvailableSize = data.sizes.find(size => size.available);
+    const initialPrice = firstAvailableSize ? firstAvailableSize.price : data.regularPrice;
+    
+    updateDetailPrice(initialPrice);
     
     // Renderizar TODAS las tallas (disponibles y no disponibles)
     renderAllSizes(data.sizes);
@@ -351,9 +354,15 @@ function selectSize(sizeData) {
 }
 
 function updateDetailPrice(price) {
-    elements.detailPrice.textContent = formatPrice(price);
+    // CORRECCIÓN: Mostrar "No disponible" para precios 0 o inválidos
+    if (price === 0 || price === null || price === undefined) {
+        elements.detailPrice.textContent = 'No disponible';
+        elements.detailPrice.style.color = var(--error-color);
+    } else {
+        elements.detailPrice.textContent = formatPrice(price);
+        elements.detailPrice.style.color = '';
+    }
 }
-
 // Navigation Functions
 function goHome() {
     elements.homeView.classList.add('active');

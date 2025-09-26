@@ -1,18 +1,21 @@
 // COURTS Sneaker Catalog App - StockX Integration
 // Muestra todas las tallas, pero solo habilita las disponibles
 
-// Product Configuration
+// Product Configuration - MEJORADO: Usar IDs de StockX
 const PRODUCTS = [
     {
         name: 'Anta Kai 1 Jelly',
+        id: '94c1e4e1-1c99-44c4-9d81-672044e7f777',
         sku: '112441113-13/1124D1113-13'
     },
     {
         name: 'Anta Kai 2 Triple Black',  
+        id: 'dbb27df3-bb6e-4a7a-ba38-1bbb5f5a022a',
         sku: '112531111S-3/8125C1111S-3/812531111S-3'
     },
     {
         name: 'Anta Kai Hélà White',
+        id: '297427c6-73bd-414f-9535-e5739c0ed93f',
         sku: '112511810S-1/1125A1810S-1/8125A1810S-1/112541810SF-1'
     }
 ];
@@ -128,19 +131,24 @@ function showLoading(show = true) {
 }
 
 // API Functions
-async function fetchProductData(sku) {
+async function fetchProductData(productId, sku) {
     try {
-        const response = await fetch(`/.netlify/functions/kicksdb?sku=${encodeURIComponent(sku)}&market=US`);
+        // Priorizar ID si está disponible, sino usar SKU
+        const queryParam = productId && productId !== 'TBD-PRODUCT-ID-2' && productId !== 'TBD-PRODUCT-ID-3' 
+            ? `id=${encodeURIComponent(productId)}` 
+            : `sku=${encodeURIComponent(sku)}`;
+            
+        const response = await fetch(`/.netlify/functions/kicksdb?${queryParam}&market=US`);
         
         if (!response.ok) {
             throw new Error(`HTTP ${response.status}`);
         }
         
         const data = await response.json();
-        console.log(`✅ Datos recibidos para: ${data.title}`);
+        console.log(`✅ Datos recibidos para: ${data.title} (${data.sizes.filter(s => s.available).length}/${data.sizes.length} tallas disponibles)`);
         return data;
     } catch (error) {
-        console.error(`Error fetching product ${sku}:`, error);
+        console.error(`Error fetching product ${productId || sku}:`, error);
         throw error;
     }
 }
@@ -151,13 +159,13 @@ async function loadAllProducts() {
     
     const loadPromises = PRODUCTS.map(async product => {
         try {
-            const data = await fetchProductData(product.sku);
-            __PRODUCT_CACHE[product.sku] = data;
-            console.log(`✅ ${product.name}: ${data._source || 'Datos cargados'}`);
+            const data = await fetchProductData(product.id, product.sku);
+            __PRODUCT_CACHE[product.id || product.sku] = data;
+            console.log(`✅ ${product.name}: ${data._source || 'Datos cargados'} - ${data.sizes.filter(s => s.available).length} tallas disponibles`);
             
         } catch (error) {
             console.error(`Failed to load ${product.name}:`, error);
-            __PRODUCT_CACHE[product.sku] = createEnhancedFallback(product);
+            __PRODUCT_CACHE[product.id || product.sku] = createEnhancedFallback(product);
             showToast(`Error cargando ${product.name} - Usando datos de respaldo`, 'warning');
         }
     });
@@ -233,7 +241,8 @@ function renderCatalog() {
     grid.innerHTML = '';
     
     PRODUCTS.forEach(product => {
-        const data = __PRODUCT_CACHE[product.sku];
+        const productKey = product.id || product.sku;
+        const data = __PRODUCT_CACHE[productKey];
         if (!data) return;
 
         const displayPrice = data.regularPrice;
@@ -248,6 +257,7 @@ function renderCatalog() {
                      class="product-image"
                      onerror="this.src='https://images.unsplash.com/photo-1542291026-7eec264c27ff?w=700&h=500&fit=crop'">
                 ${data._fallback ? '<div class="fallback-badge">Demo</div>' : ''}
+                ${data._source ? '<div class="api-badge">API Real</div>' : ''}
             </div>
             <div class="product-info">
                 <h3 class="product-name">${data.title}</h3>
@@ -258,19 +268,19 @@ function renderCatalog() {
             </div>
         `;
         
-        card.addEventListener('click', () => goDetail(product.sku));
+        card.addEventListener('click', () => goDetail(productKey));
         grid.appendChild(card);
     });
 }
 
-function renderProductDetail(sku) {
-    const data = __PRODUCT_CACHE[sku];
+function renderProductDetail(productKey) {
+    const data = __PRODUCT_CACHE[productKey];
     if (!data) {
         goHome();
         return;
     }
     
-    __SELECTED_PRODUCT_SKU = sku;
+    __SELECTED_PRODUCT_SKU = productKey;
     __SELECTED_SIZE = null;
     
     // Actualizar información del producto
@@ -284,7 +294,8 @@ function renderProductDetail(sku) {
         elements.imageBadge.style.display = 'block';
         elements.imageBadge.querySelector('.badge-text').textContent = 'Modo Demo';
     } else {
-        elements.imageBadge.style.display = 'none';
+        elements.imageBadge.style.display = 'block';
+        elements.imageBadge.querySelector('.badge-text').textContent = 'StockX API';
     }
     
     // CORRECCIÓN: Mostrar precio inicial como "Selecciona una talla"
@@ -296,6 +307,8 @@ function renderProductDetail(sku) {
     // Resetear cantidad
     elements.quantityInput.value = 1;
     elements.addToCartBtn.disabled = true;
+    
+    console.log(`Detalle cargado: ${data.title} - ${data.sizes.filter(s => s.available).length}/${data.sizes.length} tallas disponibles`);
 }
 
 function renderAllSizes(sizes) {

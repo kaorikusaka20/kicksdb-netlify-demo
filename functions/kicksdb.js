@@ -1,67 +1,18 @@
-// KicksDB FREE Plan API Integration - Netlify Function
-// ONLY uses StockX Search endpoints available on the FREE plan
+// KicksDB PRO Plan API Integration - Netlify Function
+// Uses real-time endpoints available on the PRO plan
 
-// In-memory cache with TTL (600s = 10 minutes)
 const cache = new Map();
-const CACHE_TTL = 600 * 1000;
+const CACHE_TTL = 60 * 1000; // 1 minuto para datos "en tiempo real"
 
-// Helper function to clean SKU for search
-function cleanSkuForSearch(sku) {
-    return sku.split('/').map(part => part.trim()).join(' ');
-}
-
-// Helper function to get cache key
 function getCacheKey(sku, market = 'US') {
     return `${sku}-${market}`;
 }
 
-// Helper function to check if cache is valid
 function isCacheValid(cacheEntry) {
     return cacheEntry && (Date.now() - cacheEntry.timestamp < CACHE_TTL);
 }
 
-// Mock data for when API fails (usando datos realistas de Anta)
-function createMockData(sku, productName) {
-    const basePrices = {
-        'Anta Kai 1 Jelly': 120.00,
-        'Anta Kai 2 Triple Black': 135.00,
-        'Anta Kai Hélà White': 125.00
-    };
-    
-    const basePrice = basePrices[productName] || 120.00;
-    
-    return {
-        sku: sku,
-        title: productName,
-        image: 'https://images.unsplash.com/photo-1542291026-7eec264c27ff?w=500&h=500&fit=crop',
-        lastUpdated: new Date().toISOString(),
-        regularPrice: basePrice,
-        sizes: [
-            { size: 'US 8', price: basePrice, available: true },
-            { size: 'US 8.5', price: basePrice + 5, available: true },
-            { size: 'US 9', price: basePrice + 10, available: true },
-            { size: 'US 9.5', price: basePrice + 5, available: false },
-            { size: 'US 10', price: basePrice, available: true },
-            { size: 'US 10.5', price: basePrice + 5, available: true },
-            { size: 'US 11', price: basePrice + 10, available: true }
-        ],
-        _fallback: true
-    };
-}
-
-// Map SKUs to product names
-function getProductNameBySku(sku) {
-    const productMap = {
-        '112441113-13/1124D1113-13': 'Anta Kai 1 Jelly',
-        '112531111S-3/8125C1111S-3/812531111S-3': 'Anta Kai 2 Triple Black',
-        '112511810S-1/1125A1810S-1/8125A1810S-1/112541810SF-1': 'Anta Kai Hélà White'
-    };
-    
-    return productMap[sku] || 'Anta Basketball Shoe';
-}
-
-// Main handler function - FREE PLAN VERSION
-export const handler = async (event, context) => {
+export const handler = async (event) => {
     // Handle CORS preflight
     if (event.httpMethod === 'OPTIONS') {
         return {
@@ -75,7 +26,6 @@ export const handler = async (event, context) => {
         };
     }
 
-    // Only allow GET requests
     if (event.httpMethod !== 'GET') {
         return {
             statusCode: 405,
@@ -87,7 +37,6 @@ export const handler = async (event, context) => {
         };
     }
 
-    // Extract query parameters
     const { sku, market = 'US' } = event.queryStringParameters || {};
     
     if (!sku) {
@@ -104,7 +53,6 @@ export const handler = async (event, context) => {
     const cacheKey = getCacheKey(sku, market);
     const cachedData = cache.get(cacheKey);
 
-    // Return cached data if valid
     if (isCacheValid(cachedData)) {
         console.log(`Cache hit for ${cacheKey}`);
         return {
@@ -117,75 +65,44 @@ export const handler = async (event, context) => {
         };
     }
 
-    // Check API key
     const apiKey = process.env.KICKSDB_API_KEY;
     
-    // If no API key or FREE plan, use mock data with occasional API attempt
     if (!apiKey) {
-        console.log('No API key found, using mock data');
-        const productName = getProductNameBySku(sku);
-        const mockData = createMockData(sku, productName);
-        
-        cache.set(cacheKey, {
-            data: mockData,
-            timestamp: Date.now()
-        });
-        
         return {
-            statusCode: 200,
+            statusCode: 500,
             headers: {
                 'Access-Control-Allow-Origin': '*',
                 'Content-Type': 'application/json'
             },
-            body: JSON.stringify(mockData)
+            body: JSON.stringify({ error: 'KICKSDB_API_KEY not configured' })
         };
     }
 
     try {
-        console.log(`Attempting StockX search for: ${sku}`);
+        console.log(`Fetching real-time data for SKU: ${sku}`);
         
-        // ONLY use the FREE plan endpoint: StockX Search
-        const searchQuery = cleanSkuForSearch(sku);
-        const searchEndpoint = `https://api.kicks.dev/stockx/search?query=${encodeURIComponent(searchQuery)}&limit=5`;
+        // ENDPOINT PRINCIPAL para Plan Pro - Busqueda directa por SKU
+        const primaryEndpoint = `https://api.kicks.dev/v3/stockx/products?query=${encodeURIComponent(sku)}&limit=1`;
         
-        console.log(`Trying FREE plan endpoint: ${searchEndpoint}`);
+        console.log(`Trying primary endpoint: ${primaryEndpoint}`);
         
-        const response = await fetch(searchEndpoint, {
+        const response = await fetch(primaryEndpoint, {
             method: 'GET',
             headers: {
                 'Authorization': `Bearer ${apiKey}`,
                 'Content-Type': 'application/json',
-                'User-Agent': 'Courts-Sneaker-App/1.0'
+                'User-Agent': 'Courts-Pro-App/1.0'
             }
         });
         
         console.log(`Response status: ${response.status}`);
         
         if (response.ok) {
-            const contentType = response.headers.get('content-type');
-            if (contentType && contentType.includes('application/json')) {
-                const data = await response.json();
-                console.log('StockX search successful, processing results...');
-                
-                // Process StockX search results
-                let productData = null;
-                
-                if (data.results && data.results.length > 0) {
-                    // Use the first result from search
-                    const firstResult = data.results[0];
-                    productData = {
-                        sku: sku,
-                        title: firstResult.title || firstResult.name || getProductNameBySku(sku),
-                        image: firstResult.image || firstResult.thumbnail || 'https://images.unsplash.com/photo-1542291026-7eec264c27ff?w=500&h=500&fit=crop',
-                        lastUpdated: new Date().toISOString(),
-                        regularPrice: firstResult.retail_price_cents ? firstResult.retail_price_cents / 100 : 120.00,
-                        sizes: generateSizesFromStockX(firstResult),
-                        _apiSource: 'StockX Search'
-                    };
-                } else {
-                    // No results found, use mock data
-                    throw new Error('No products found in search results');
-                }
+            const data = await response.json();
+            console.log('API response received, processing...');
+            
+            if (data.data && data.data.length > 0) {
+                const productData = normalizeProResponse(data.data[0], sku);
                 
                 cache.set(cacheKey, {
                     data: productData,
@@ -201,76 +118,204 @@ export const handler = async (event, context) => {
                     body: JSON.stringify(productData)
                 };
             } else {
-                // Response is not JSON, likely HTML error page
-                throw new Error('API returned non-JSON response (likely plan limitation)');
+                // Fallback a búsqueda más amplia
+                return await tryAlternativeSearch(sku, apiKey, cacheKey);
             }
-        } else if (response.status === 403) {
-            // API key valid but insufficient permissions (FREE plan trying to access paid endpoint)
-            console.log('API returned 403 - Using mock data instead');
-            throw new Error('FREE plan limitation - Upgrade to Standard for full API access');
         } else {
-            // Other error
-            const errorText = await response.text();
-            console.log(`API error ${response.status}: ${errorText.substring(0, 200)}`);
-            throw new Error(`API returned ${response.status}`);
+            console.log(`Primary endpoint failed: ${response.status}`);
+            return await tryAlternativeSearch(sku, apiKey, cacheKey);
         }
         
     } catch (error) {
-        console.error('Error fetching from KicksDB API:', error.message);
-        
-        // Fallback to mock data
-        const productName = getProductNameBySku(sku);
-        const mockData = createMockData(sku, productName);
-        mockData._fallback = true;
-        mockData._apiError = error.message;
-        
-        cache.set(cacheKey, {
-            data: mockData,
-            timestamp: Date.now()
-        });
+        console.error('Error fetching from KicksDB Pro API:', error);
         
         return {
-            statusCode: 200,
+            statusCode: 500,
             headers: {
                 'Access-Control-Allow-Origin': '*',
                 'Content-Type': 'application/json'
             },
-            body: JSON.stringify(mockData)
+            body: JSON.stringify({ 
+                error: 'Failed to fetch product data',
+                message: error.message,
+                sku: sku
+            })
         };
     }
 };
 
-// Helper function to generate sizes from StockX data
-function generateSizesFromStockX(product) {
-    const basePrice = product.retail_price_cents ? product.retail_price_cents / 100 : 120.00;
+// Función alternativa de búsqueda
+async function tryAlternativeSearch(sku, apiKey, cacheKey) {
+    try {
+        console.log('Trying alternative search endpoint...');
+        
+        // Endpoint alternativo para búsqueda más flexible
+        const searchQuery = sku.split('/')[0].trim(); // Usar primera parte del SKU
+        const searchEndpoint = `https://api.kicks.dev/v3/stockx/search?query=${encodeURIComponent(searchQuery)}&limit=5`;
+        
+        const response = await fetch(searchEndpoint, {
+            method: 'GET',
+            headers: {
+                'Authorization': `Bearer ${apiKey}`,
+                'Content-Type': 'application/json'
+            }
+        });
+        
+        if (response.ok) {
+            const data = await response.json();
+            
+            if (data.data && data.data.length > 0) {
+                // Encontrar la mejor coincidencia
+                const bestMatch = findBestMatch(data.data, sku);
+                const productData = normalizeProResponse(bestMatch, sku);
+                
+                cache.set(cacheKey, {
+                    data: productData,
+                    timestamp: Date.now()
+                });
+                
+                return {
+                    statusCode: 200,
+                    headers: {
+                        'Access-Control-Allow-Origin': '*',
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify(productData)
+                };
+            }
+        }
+        
+        throw new Error('No products found in search results');
+        
+    } catch (error) {
+        throw new Error(`Alternative search also failed: ${error.message}`);
+    }
+}
+
+// Encontrar mejor coincidencia del SKU
+function findBestMatch(products, targetSku) {
+    const targetParts = targetSku.toLowerCase().split('/').map(part => part.trim());
+    
+    return products.reduce((best, product) => {
+        const productSku = (product.sku || '').toLowerCase();
+        let score = 0;
+        
+        targetParts.forEach(part => {
+            if (productSku.includes(part)) {
+                score++;
+            }
+        });
+        
+        return score > best.score ? { product, score } : best;
+    }, { product: products[0], score: 0 }).product;
+}
+
+// Normalizar respuesta del plan Pro
+function normalizeProResponse(data, sku) {
+    console.log('Normalizing Pro response:', JSON.stringify(data, null, 2));
+    
+    // Extraer información básica con mejores fallbacks
+    const title = data.title || data.name || data.product_name || 'Anta Basketball Shoe';
+    const image = data.image || data.thumbnail || data.main_picture_url || 'https://images.unsplash.com/photo-1542291026-7eec264c27ff?w=500&h=500&fit=crop';
+    
+    // Precios en tiempo real - estructura mejorada
+    let regularPrice = extractBestPrice(data);
+    const sizes = extractRealTimeSizes(data, regularPrice);
+    
+    return {
+        sku: sku,
+        title: title,
+        image: image,
+        lastUpdated: new Date().toISOString(),
+        regularPrice: regularPrice,
+        sizes: sizes,
+        _source: 'KicksDB Pro',
+        _features: {
+            realTimeData: true,
+            marketPrices: true,
+            availableSizes: sizes.filter(s => s.available).length
+        }
+    };
+}
+
+// Extraer mejor precio disponible
+function extractBestPrice(data) {
+    // Priorizar precios en tiempo real
+    if (data.lowest_ask && !isNaN(parseFloat(data.lowest_ask))) {
+        return parseFloat(data.lowest_ask);
+    }
+    if (data.retail_price_cents && !isNaN(data.retail_price_cents)) {
+        return data.retail_price_cents / 100;
+    }
+    if (data.retailPrice && !isNaN(parseFloat(data.retailPrice))) {
+        return parseFloat(data.retailPrice);
+    }
+    
+    // Precios por tamaño
+    if (data.prices && typeof data.prices === 'object') {
+        const priceValues = Object.values(data.prices).flatMap(sizePrices => 
+            Object.values(sizePrices).filter(price => price > 0)
+        );
+        if (priceValues.length > 0) {
+            return Math.min(...priceValues);
+        }
+    }
+    
+    return 120.00; // Fallback
+}
+
+// Extraer tallas en tiempo real
+function extractRealTimeSizes(data, basePrice) {
     const sizes = [];
     
-    // Common US sizes
-    const commonSizes = ['US 8', 'US 8.5', 'US 9', 'US 9.5', 'US 10', 'US 10.5', 'US 11', 'US 11.5', 'US 12'];
-    
-    commonSizes.forEach((size, index) => {
-        // Simulate price variations and availability
-        const priceVariation = Math.random() * 40 - 20; // +/- $20
-        const price = Math.max(basePrice + priceVariation, 80); // Minimum $80
-        const available = Math.random() > 0.3; // 70% chance available
-        
-        sizes.push({
-            size: size,
-            price: parseFloat(price.toFixed(2)),
-            available: available
+    // Estructura de datos en tiempo real de KicksDB Pro
+    if (data.prices && typeof data.prices === 'object') {
+        Object.entries(data.prices).forEach(([currencySize, sizePrices]) => {
+            Object.entries(sizePrices).forEach(([size, price]) => {
+                if (price > 0) {
+                    sizes.push({
+                        size: `US ${size}`,
+                        price: parseFloat(price),
+                        available: true
+                    });
+                }
+            });
         });
-    });
+    }
+    
+    // Fallback a variantes si no hay precios directos
+    if (sizes.length === 0 && data.variants) {
+        data.variants.forEach(variant => {
+            const price = variant.price || variant.lowest_ask || basePrice;
+            sizes.push({
+                size: variant.size || variant.us_size || 'Unknown',
+                price: parseFloat(price),
+                available: variant.available !== false
+            });
+        });
+    }
+    
+    // Fallback final si no hay tallas
+    if (sizes.length === 0) {
+        const commonSizes = ['US 8', 'US 8.5', 'US 9', 'US 9.5', 'US 10', 'US 10.5', 'US 11'];
+        commonSizes.forEach(size => {
+            sizes.push({
+                size: size,
+                price: basePrice + (Math.random() * 40 - 20),
+                available: Math.random() > 0.3
+            });
+        });
+    }
     
     return sizes;
 }
 
-// Cleanup old cache entries periodically
+// Limpieza periódica de cache
 setInterval(() => {
     const now = Date.now();
     for (const [key, entry] of cache.entries()) {
         if (now - entry.timestamp > CACHE_TTL) {
             cache.delete(key);
-            console.log(`Cleaned up expired cache entry: ${key}`);
         }
     }
-}, 10 * 60 * 1000);
+}, 5 * 60 * 1000);

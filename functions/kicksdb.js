@@ -220,18 +220,10 @@ export const handler = async (event, context) => {
     const cleanedSku = cleanSku(sku);
     console.log(`Attempting to fetch product from KicksDB FREE plan: ${cleanedSku}`);
     
-    // Try ONLY endpoints available on FREE plan
-    // Based on KicksDB documentation, FREE plan only has access to StockX Products API
+    // Try ONLY endpoints available on FREE plan (StockX search)
     const freeEndpoints = [
-      // StockX Products API - Search (available on FREE plan)
       `https://api.kicks.dev/stockx/search?query=${encodeURIComponent(cleanedSku)}`,
-      `https://api.kicks.dev/stockx/search?query=${encodeURIComponent(cleanedSku)}&limit=10`,
-      // Alternative search formats
-      `https://api.kicks.dev/stockx/products/search?q=${encodeURIComponent(cleanedSku)}`,
-      `https://api.kicks.dev/stockx/products/search?query=${encodeURIComponent(cleanedSku)}`,
-      // Try with different SKU formats
       `https://api.kicks.dev/stockx/search?query=${encodeURIComponent(cleanedSku.replace('/', ' '))}`,
-      // Try searching by individual SKU parts
       `https://api.kicks.dev/stockx/search?query=${encodeURIComponent(cleanedSku.split('/')[0])}`
     ];
     
@@ -248,38 +240,25 @@ export const handler = async (event, context) => {
           method: 'GET',
           headers: {
             'Authorization': `Bearer ${apiKey}`,
-            'X-API-Key': apiKey,
             'Content-Type': 'application/json',
-            'User-Agent': 'Courts-Netlify-Function/1.0',
-            'Accept': 'application/json'
+            'User-Agent': 'Courts-Netlify-Function/1.0'
           }
         });
         
         console.log(`Response status: ${response.status} ${response.statusText}`);
         
-        if (response.ok) {
-          const responseText = await response.text();
-          console.log(`Raw response (first 500 chars):`, responseText.substring(0, 500));
-          
-          // Check if response is JSON
-          if (responseText.trim().startsWith('{') || responseText.trim().startsWith('[')) {
-            try {
-              responseData = JSON.parse(responseText);
-              usedEndpoint = endpoint;
-              console.log(`Success with endpoint: ${endpoint}`);
-              break;
-            } catch (jsonError) {
-              console.log(`JSON parse error with ${endpoint}:`, jsonError.message);
-              continue;
-            }
-          } else {
-            console.log(`Non-JSON response from ${endpoint}`);
-            continue;
-          }
+        // Check if response is JSON
+        const contentType = response.headers.get('content-type');
+        if (contentType && contentType.includes('application/json')) {
+          responseData = await response.json();
+          usedEndpoint = endpoint;
+          console.log(`Success with endpoint: ${endpoint}`);
+          break;
         } else {
-          const errorText = await response.text();
-          console.log(`Failed with ${endpoint}: ${response.status} - ${response.statusText}`);
-          console.log(`Error response:`, errorText.substring(0, 200));
+          const text = await response.text();
+          console.log(`Non-JSON response from ${endpoint}: ${text.substring(0, 200)}`);
+          // Try next endpoint
+          continue;
         }
       } catch (endpointError) {
         console.log(`Error with ${endpoint}:`, endpointError.message);
@@ -301,7 +280,6 @@ export const handler = async (event, context) => {
           message: 'All FREE plan endpoints returned invalid responses. Your API key might need upgrade to Standard plan.',
           sku: cleanedSku,
           plan: 'FREE',
-          suggestion: 'Consider upgrading to Standard plan ($29/month) for full API access',
           endpoints_tried: freeEndpoints.length
         })
       };

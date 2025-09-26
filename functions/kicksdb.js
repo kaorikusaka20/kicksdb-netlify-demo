@@ -166,62 +166,66 @@ function findBestMatch(products, targetSku) {
     }, { product: products[0], score: 0 }).product;
 }
 
-// Normalizar respuesta de StockX
 function normalizeStockXResponse(data, sku) {
-    console.log('Normalizing StockX response');
+    console.log('Normalizando respuesta de StockX para precios y tallas...');
     
-    // Usar la imagen con dimensiones 700x500 de StockX
-    const image = data.image || data.gallery?.[0] || getProductImageBySku(sku);
-    const title = data.title || getProductNameBySku(sku);
+    // 1. Precio Base CORREGIDO: Usar min_price o lowestAsk real
+    const basePrice = data.min_price || 
+                     (data.variants && data.variants.length > 0 ? 
+                      Math.min(...data.variants.filter(v => v.lowest_ask > 0)
+                                 .map(v => v.lowest_ask)) : 120.00);
+
+    // 2. Tallas CORREGIDAS: Extraer de variants con disponibilidad real
+    const sizes = extractSizesFromStockXVariants(data.variants, basePrice);
     
-    // Extraer tallas y precios reales de los variants
-    const sizes = extractSizesFromStockXVariants(data.variants);
-    
-    // Precio base (usar el mínimo precio disponible o retail price)
-    const basePrice = data.min_price || parseFloat(data.traits?.find(t => t.trait === 'Retail Price')?.value) || 120.00;
-    
+    // 3. Imagen con tamaño específico de la API StockX (700x500)
+    const image = data.image ? `${data.image}?fit=fill&bg=FFFFFF&w=700&h=500` : 
+                              getProductImageBySku(sku);
+
     return {
         sku: sku,
-        title: title,
+        title: data.title || getProductNameBySku(sku),
         image: image,
         lastUpdated: data.updated_at || new Date().toISOString(),
         regularPrice: basePrice,
         sizes: sizes,
-        _source: 'StockX API',
+        _source: 'StockX API Corregida',
         _features: {
             realTimeData: true,
             availableSizes: sizes.filter(s => s.available).length,
-            totalSizes: sizes.length
+            totalSizes: sizes.length,
+            priceConsistency: 'Corregida'
         }
     };
 }
 
-// Extraer tallas reales de StockX con disponibilidad
-function extractSizesFromStockXVariants(variants) {
+
+function extractSizesFromStockXVariants(variants, basePrice) {
     if (!variants || !Array.isArray(variants)) {
-        return generateAllSizesWithAvailability();
+        return generateAllSizesWithAvailability(basePrice);
     }
     
     const sizes = [];
     
     variants.forEach(variant => {
-        const size = variant.size;
-        const lowestAsk = variant.lowest_ask;
-        const available = lowestAsk > 0; // Disponible si lowest_ask > 0
+        // CORRECCIÓN: Disponibilidad basada en lowest_ask > 0
+        const available = variant.lowest_ask > 0;
+        // CORRECCIÓN: Precio REAL de la talla, no el base
+        const sizePrice = available ? variant.lowest_ask : 0;
         
         sizes.push({
-            size: `US ${size}`,
-            price: parseFloat(lowestAsk) || 0,
+            size: `US ${variant.size}`,
+            price: parseFloat(sizePrice),
             available: available,
             originalData: {
-                lowest_ask: lowestAsk,
+                lowest_ask: variant.lowest_ask,
                 total_asks: variant.total_asks,
                 size_type: variant.size_type
             }
         });
     });
     
-    return sizes.length > 0 ? sizes : generateAllSizesWithAvailability();
+    return sizes.length > 0 ? sizes : generateAllSizesWithAvailability(basePrice);
 }
 
 // Generar todas las tallas (disponibles y no disponibles)

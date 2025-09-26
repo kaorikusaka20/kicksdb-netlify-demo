@@ -81,3 +81,55 @@ function createEnhancedFallback(product) {
         _message: 'Datos de respaldo - Verifique conexión API'
     };
 }
+
+function renderCatalog() {
+    const grid = elements.productGrid;
+    grid.innerHTML = '';
+    
+    PRODUCTS.forEach(product => {
+        const data = __PRODUCT_CACHE[product.sku];
+        if (!data) return;
+
+        // Estrategia para elegir el mejor precio para la vista de lista
+        let displayPrice = data.regularPrice; // Precio por defecto
+
+        // 1. Buscar el precio más bajo disponible
+        if (data.sizes && data.sizes.length > 0) {
+            const availableSizes = data.sizes.filter(size => size.available);
+            if (availableSizes.length > 0) {
+                const lowestPriceSize = availableSizes.reduce((minSize, currentSize) => 
+                    currentSize.price < minSize.price ? currentSize : minSize
+                );
+                displayPrice = lowestPriceSize.price;
+            }
+        } 
+        // 2. Si no hay 'regularPrice', buscar cualquier precio en la estructura de la API
+        else if (!displayPrice && data.lowest_ask) {
+            displayPrice = parseFloat(data.lowest_ask);
+        } else if (!displayPrice && data.retail_price_cents) {
+            displayPrice = data.retail_price_cents / 100;
+        }
+
+        const card = document.createElement('div');
+        card.className = 'product-card';
+        card.innerHTML = `
+            <div class="product-image-container">
+                <img src="${data.image || '/placeholder-sneaker.jpg'}" 
+                     alt="${data.title}" 
+                     class="product-image"
+                     onerror="this.src='/placeholder-sneaker.jpg'">
+            </div>
+            <div class="product-info">
+                <h3 class="product-name">${data.title}</h3>
+                <div class="product-price">
+                    <span class="price-amount">${formatPrice(displayPrice)}</span>
+                    ${data.sizes && data.sizes.filter(s => s.available).length > 1 ? 
+                      '<span class="price-variation-note">(Precios varían por talla)</span>' : ''}
+                </div>
+            </div>
+        `;
+        
+        card.addEventListener('click', () => goDetail(product.sku));
+        grid.appendChild(card);
+    });
+}

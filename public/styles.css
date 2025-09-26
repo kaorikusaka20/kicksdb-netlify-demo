@@ -393,7 +393,7 @@ body {
 
 .detail-image {
     width: 100%;
-    aspect-ratio: 1;
+    height: 500px; /* o el valor que desees */
     object-fit: cover;
     border-radius: var(--radius-xl);
     border: 1px solid var(--border-color);

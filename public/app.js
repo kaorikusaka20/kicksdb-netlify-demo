@@ -114,10 +114,11 @@ function renderCatalog() {
         card.className = 'product-card';
         card.innerHTML = `
             <div class="product-image-container">
-                <img src="${data.image || '/placeholder-sneaker.jpg'}" 
+                // Dentro de la tarjeta del producto
+                <img src="${data.image}" 
                      alt="${data.title}" 
                      class="product-image"
-                     onerror="this.src='/placeholder-sneaker.jpg'">
+                     onerror="this.src='https://images.unsplash.com/photo-1542291026-7eec264c27ff?w=300&h=300&fit=crop'">
             </div>
             <div class="product-info">
                 <h3 class="product-name">${data.title}</h3>

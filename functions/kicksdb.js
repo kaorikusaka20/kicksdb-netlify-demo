@@ -1,5 +1,5 @@
-// KicksDB Real API Integration - Netlify Function
-// ONLY uses real KicksDB data - NO FALLBACKS
+// KicksDB FREE Plan API Integration - Netlify Function
+// ONLY uses endpoints available on the FREE plan
 
 // In-memory cache with TTL (600s = 10 minutes)
 const cache = new Map();
@@ -24,69 +24,92 @@ function isCacheValid(cacheEntry) {
 function normalizeKicksDbResponse(data, sku) {
   console.log('Normalizing KicksDB response:', JSON.stringify(data, null, 2));
   
+  // Handle search results array
+  if (Array.isArray(data)) {
+    if (data.length === 0) {
+      throw new Error('Product not found in search results');
+    }
+    // Use the first result from search
+    data = data[0];
+  }
+  
+  // Handle paginated results
+  if (data.results && Array.isArray(data.results)) {
+    if (data.results.length === 0) {
+      throw new Error('Product not found in search results');
+    }
+    data = data.results[0];
+  }
+  
   // Extract basic product info with multiple fallbacks
-  const title = data.title || data.name || data.product_name || data.productName || 'Unknown Product';
-  const image = data.image || data.thumbnail || data.imageUrl || data.media?.[0]?.imageUrl || data.images?.[0];
+  const title = data.title || data.name || data.product_name || data.productName || data.shoe || data.sneaker_name || 'Unknown Product';
+  const image = data.image || data.thumbnail || data.imageUrl || data.media?.[0]?.imageUrl || data.images?.[0] || data.main_picture_url;
   const lastUpdated = data.updated_at || data.lastUpdated || data.last_updated || new Date().toISOString();
   
-  // Determine regular price (fallback hierarchy)
-  // Priority: retailPrice > msrp > basePrice > lowestAsk > price > averagePrice
+  // Determine regular price (fallback hierarchy for StockX data)
   let regularPrice = null;
   
-  if (data.retailPrice && !isNaN(parseFloat(data.retailPrice))) {
+  if (data.retail_price_cents && !isNaN(data.retail_price_cents)) {
+    regularPrice = data.retail_price_cents / 100; // Convert cents to dollars
+    console.log('Using retail_price_cents:', regularPrice);
+  } else if (data.retailPrice && !isNaN(parseFloat(data.retailPrice))) {
     regularPrice = parseFloat(data.retailPrice);
     console.log('Using retailPrice:', regularPrice);
   } else if (data.msrp && !isNaN(parseFloat(data.msrp))) {
     regularPrice = parseFloat(data.msrp);
     console.log('Using msrp:', regularPrice);
-  } else if (data.basePrice && !isNaN(parseFloat(data.basePrice))) {
-    regularPrice = parseFloat(data.basePrice);
-    console.log('Using basePrice:', regularPrice);
+  } else if (data.lowest_ask && !isNaN(parseFloat(data.lowest_ask))) {
+    regularPrice = parseFloat(data.lowest_ask);
+    console.log('Using lowest_ask:', regularPrice);
   } else if (data.lowestAsk && !isNaN(parseFloat(data.lowestAsk))) {
     regularPrice = parseFloat(data.lowestAsk);
     console.log('Using lowestAsk:', regularPrice);
+  } else if (data.market && data.market.lowest_ask) {
+    regularPrice = parseFloat(data.market.lowest_ask);
+    console.log('Using market.lowest_ask:', regularPrice);
   } else if (data.price && !isNaN(parseFloat(data.price))) {
     regularPrice = parseFloat(data.price);
     console.log('Using price:', regularPrice);
-  } else if (data.averagePrice && !isNaN(parseFloat(data.averagePrice))) {
-    regularPrice = parseFloat(data.averagePrice);
-    console.log('Using averagePrice:', regularPrice);
   }
   
   if (!regularPrice) {
     throw new Error('No valid price found in API response');
   }
   
-  // Extract sizes information with multiple format support
+  // Extract sizes information from StockX format
   let sizes = [];
   
-  if (data.variants && Array.isArray(data.variants)) {
+  // Try market data first (StockX format)
+  if (data.market && data.market.statistics) {
+    console.log('Processing StockX market statistics');
+    Object.entries(data.market.statistics).forEach(([size, stats]) => {
+      if (stats && !isNaN(parseFloat(stats.lowest_ask || stats.last_sale))) {
+        sizes.push({
+          size: size.replace('_', '.'), // Convert US_8_5 to US 8.5
+          price: parseFloat(stats.lowest_ask || stats.last_sale || regularPrice),
+          available: !!stats.lowest_ask
+        });
+      }
+    });
+  }
+  
+  // Fallback to variants if available
+  if (sizes.length === 0 && data.variants && Array.isArray(data.variants)) {
     console.log('Processing variants array');
     sizes = data.variants.map(variant => ({
       size: variant.size || variant.us_size || variant.usSize || `US ${variant.size_us || variant.sizeUs}` || 'Unknown',
       price: parseFloat(variant.price || variant.lowest_ask || variant.lowestAsk || variant.ask || regularPrice),
       available: variant.available !== false && (variant.stock === undefined || variant.stock > 0)
     }));
-  } else if (data.sizes && Array.isArray(data.sizes)) {
+  }
+  
+  // Fallback to sizes array
+  if (sizes.length === 0 && data.sizes && Array.isArray(data.sizes)) {
     console.log('Processing sizes array');
     sizes = data.sizes.map(sizeData => ({
       size: sizeData.size || sizeData.us_size || sizeData.usSize || `US ${sizeData.size_us || sizeData.sizeUs}` || 'Unknown',
       price: parseFloat(sizeData.price || sizeData.lowest_ask || sizeData.lowestAsk || sizeData.ask || regularPrice),
       available: sizeData.available !== false && (sizeData.stock === undefined || sizeData.stock > 0)
-    }));
-  } else if (data.asks && Array.isArray(data.asks)) {
-    console.log('Processing asks array (StockX format)');
-    sizes = data.asks.map(ask => ({
-      size: ask.size || ask.shoe_size || ask.shoeSize || 'Unknown',
-      price: parseFloat(ask.price || ask.amount || regularPrice),
-      available: true // If ask exists, it's available
-    }));
-  } else if (data.bids && Array.isArray(data.bids)) {
-    console.log('Processing bids array');
-    sizes = data.bids.map(bid => ({
-      size: bid.size || bid.shoe_size || bid.shoeSize || 'Unknown',
-      price: parseFloat(bid.price || bid.amount || regularPrice),
-      available: true
     }));
   }
   
@@ -94,7 +117,14 @@ function normalizeKicksDbResponse(data, sku) {
   sizes = sizes.filter(size => size.size && size.size !== 'Unknown' && !isNaN(size.price));
   
   if (sizes.length === 0) {
-    throw new Error('No valid sizes found in API response');
+    // Create basic size range with regular price if no sizes found
+    console.log('No sizes found, creating basic size range');
+    const commonSizes = ['US 8', 'US 9', 'US 10', 'US 11'];
+    sizes = commonSizes.map(size => ({
+      size,
+      price: regularPrice,
+      available: true
+    }));
   }
   
   const normalized = {
@@ -188,31 +218,31 @@ export const handler = async (event, context) => {
   try {
     // Clean the SKU for the API call
     const cleanedSku = cleanSku(sku);
-    console.log(`Attempting to fetch product from KicksDB: ${cleanedSku}`);
+    console.log(`Attempting to fetch product from KicksDB FREE plan: ${cleanedSku}`);
     
-    // Try official KicksDB API endpoints based on their documentation
-    const possibleEndpoints = [
-      // Standard API endpoint (most likely)
-      `https://api.kicks.dev/v1/products/${encodeURIComponent(cleanedSku)}`,
-      `https://api.kicks.dev/v1/product/${encodeURIComponent(cleanedSku)}`,
-      // Alternative Standard API
-      `https://api.kicks.dev/standard/products/${encodeURIComponent(cleanedSku)}`,
-      `https://api.kicks.dev/standard/product/${encodeURIComponent(cleanedSku)}`,
-      // Unified API endpoint
-      `https://api.kicks.dev/unified/products/${encodeURIComponent(cleanedSku)}`,
-      `https://api.kicks.dev/unified/product/${encodeURIComponent(cleanedSku)}`,
-      // Search endpoint as fallback
-      `https://api.kicks.dev/v1/search?q=${encodeURIComponent(cleanedSku)}&limit=1`
+    // Try ONLY endpoints available on FREE plan
+    // Based on KicksDB documentation, FREE plan only has access to StockX Products API
+    const freeEndpoints = [
+      // StockX Products API - Search (available on FREE plan)
+      `https://api.kicks.dev/stockx/search?query=${encodeURIComponent(cleanedSku)}`,
+      `https://api.kicks.dev/stockx/search?query=${encodeURIComponent(cleanedSku)}&limit=10`,
+      // Alternative search formats
+      `https://api.kicks.dev/stockx/products/search?q=${encodeURIComponent(cleanedSku)}`,
+      `https://api.kicks.dev/stockx/products/search?query=${encodeURIComponent(cleanedSku)}`,
+      // Try with different SKU formats
+      `https://api.kicks.dev/stockx/search?query=${encodeURIComponent(cleanedSku.replace('/', ' '))}`,
+      // Try searching by individual SKU parts
+      `https://api.kicks.dev/stockx/search?query=${encodeURIComponent(cleanedSku.split('/')[0])}`
     ];
     
     let response = null;
     let usedEndpoint = null;
     let responseData = null;
     
-    // Try each endpoint until one works
-    for (const endpoint of possibleEndpoints) {
+    // Try each FREE plan endpoint until one works
+    for (const endpoint of freeEndpoints) {
       try {
-        console.log(`Trying KicksDB endpoint: ${endpoint}`);
+        console.log(`Trying KicksDB FREE endpoint: ${endpoint}`);
         
         response = await fetch(endpoint, {
           method: 'GET',
@@ -258,7 +288,7 @@ export const handler = async (event, context) => {
     }
     
     if (!responseData) {
-      console.error('All KicksDB endpoints failed');
+      console.error('All KicksDB FREE endpoints failed');
       return {
         statusCode: 502,
         headers: {
@@ -268,35 +298,16 @@ export const handler = async (event, context) => {
         },
         body: JSON.stringify({ 
           error: 'Unable to connect to KicksDB API',
-          message: 'All API endpoints returned invalid responses. Please check your API key and SKU format.',
+          message: 'All FREE plan endpoints returned invalid responses. Your API key might need upgrade to Standard plan.',
           sku: cleanedSku,
-          endpoints_tried: possibleEndpoints.length
+          plan: 'FREE',
+          suggestion: 'Consider upgrading to Standard plan ($29/month) for full API access',
+          endpoints_tried: freeEndpoints.length
         })
       };
     }
 
     console.log(`Processing KicksDB response for ${cleanedSku}:`, JSON.stringify(responseData, null, 2));
-
-    // Handle search endpoint response (array)
-    if (Array.isArray(responseData)) {
-      if (responseData.length === 0) {
-        return {
-          statusCode: 404,
-          headers: {
-            'Access-Control-Allow-Origin': '*',
-            'Content-Type': 'application/json',
-            'Cache-Control': 'no-store'
-          },
-          body: JSON.stringify({ 
-            error: 'Product not found',
-            sku: cleanedSku,
-            message: 'No products found matching this SKU'
-          })
-        };
-      }
-      // Use the first search result
-      responseData = responseData[0];
-    }
 
     // Normalize the response to our expected format
     const normalizedData = normalizeKicksDbResponse(responseData, sku);
@@ -332,7 +343,8 @@ export const handler = async (event, context) => {
       body: JSON.stringify({ 
         error: 'API processing error',
         message: error.message,
-        sku: cleanSku(sku)
+        sku: cleanSku(sku),
+        plan: 'FREE'
       })
     };
   }

@@ -302,16 +302,24 @@ body {
     transform: scale(1.05);
 }
 
-.fallback-badge {
+.fallback-badge, .api-badge {
     position: absolute;
     top: var(--spacing-xs);
     right: var(--spacing-xs);
-    background: var(--warning-color);
-    color: var(--bg-primary);
     padding: 2px var(--spacing-xs);
     border-radius: var(--radius-sm);
     font-size: var(--font-size-xs);
     font-weight: 600;
+}
+
+.fallback-badge {
+    background: var(--warning-color);
+    color: var(--bg-primary);
+}
+
+.api-badge {
+    background: var(--success-color);
+    color: var(--bg-primary);
 }
 
 .product-info {

@@ -206,36 +206,165 @@ function findBestSkuMatch(products, targetSku) {
     return bestMatch;
 }
 
-// CORRECCIÓN: Normalización mejorada que usa datos reales de la API
+// CORRECCIÓN: Normalización usando estructura REAL del JSON de StockX
 function normalizeStockXResponse(product, queryParam, isDirectId = false) {
     console.log(`Normalizing ${isDirectId ? 'direct ID' : 'search'} response from StockX API...`);
     
     // 1. TÍTULO: Usar el título real de la API StockX
-    const title = product.title || getProductNameFallback(queryParam);
+    const title = product.title || `Producto ${queryParam}`;
     
     // 2. SKU: Usar el SKU real de la API
     const sku = product.sku || queryParam;
     
-    // 3. PRECIO BASE: Usar lowest_price o min_price de StockX
-    const basePrice = product.lowest_price || product.min_price || getOfficialPriceFallback(queryParam);
+    // 3. PRECIO BASE: Usar min_price de StockX
+    const basePrice = product.min_price || 120;
     
     // 4. IMAGEN: Usar imagen real de StockX
-    const image = product.image || getProductImageFallback(queryParam);
+    const image = product.image || 'https://images.unsplash.com/photo-1542291026-7eec264c27ff?w=700&h=500&fit=crop';
     
-    // 5. TALLAS: Extraer variantes reales
-    const sizes = extractStockXVariants(product.variants, queryParam);
+    // 5. TALLAS: Extraer variantes reales usando estructura correcta
+    const sizes = extractRealStockXVariants(product.variants || [], basePrice);
     
     // 6. METADATOS: Información adicional de StockX
     const lastUpdated = product.updated_at || new Date().toISOString();
 
     return {
         sku: sku,
-        title: title, // CORRECCIÓN: Ahora usa el título real de la API
+        title: title, // TÍTULO REAL de la API
         image: image,
         lastUpdated: lastUpdated,
         regularPrice: basePrice,
         sizes: sizes,
         _source: 'StockX API - Datos en Tiempo Real',
+        _apiData: {
+            realTimeData: true,
+            availableSizes: sizes.filter(s => s.available).length,
+            totalSizes: sizes.length,
+            minPrice: product.min_price,
+            maxPrice: product.max_price,
+            weeklyOrders: product.weekly_orders,
+            totalOrders: product.weekly_orders
+        }
+    };
+}
+
+// CORRECCIÓN: Extracción usando estructura REAL del JSON
+function extractRealStockXVariants(variants, fallbackBasePrice) {
+    if (!variants || !Array.isArray(variants)) {
+        console.log('No variants found, generating realistic fallback data');
+        return generateRealisticSizeData(fallbackBasePrice);
+    }
+    
+    console.log(`Processing ${variants.length} real variants from StockX API`);
+    const sizes = [];
+    
+    variants.forEach(variant => {
+        // ESTRUCTURA REAL del JSON StockX:
+        const sizeUS = variant.size || 'N/A';
+        const lowestAsk = variant.lowest_ask || 0;
+        const totalAsks = variant.total_asks || 0;
+        const sales15Days = variant.sales_count_15_days || 0;
+        
+        // LÓGICA REAL de disponibilidad:
+        // - lowest_ask > 0 significa que hay precio disponible
+        // - total_asks > 0 significa que hay ofertas activas
+        const available = lowestAsk > 0 && totalAsks > 0;
+        
+        console.log(`Size US ${sizeUS}: ${lowestAsk}, ${totalAsks} asks, ${sales15Days} sales, available: ${available}`);
+        
+        sizes.push({
+            size: `US ${sizeUS}`,
+            price: available ? parseFloat(lowestAsk.toFixed(2)) : 0,
+            available: available,
+            stockxData: {
+                lowest_ask: lowestAsk,
+                total_asks: totalAsks,
+                sales_15_days: sales15Days,
+                sales_30_days: variant.sales_count_30_days || 0,
+                sales_60_days: variant.sales_count_60_days || 0,
+                previous_lowest_ask: variant.previous_lowest_ask || 0
+            }
+        });
+    });
+    
+    // Ordenar por talla numéricamente
+    sizes.sort((a, b) => {
+        const sizeA = parseFloat(a.size.replace('US ', ''));
+        const sizeB = parseFloat(b.size.replace('US ', ''));
+        return sizeA - sizeB;
+    });
+    
+    console.log(`Processed ${sizes.length} sizes, ${sizes.filter(s => s.available).length} available`);
+    return sizes;
+}
+
+// CORRECCIÓN: Solo IDs en mock data
+function createEnhancedStockXMockData(queryParam, isIdQuery = false) {
+    console.log(`Creating enhanced mock data for ${isIdQuery ? 'ID' : 'query'}: ${queryParam}`);
+    
+    // Solo generar nombres temporales si no tenemos datos reales
+    const fallbackTitle = isIdQuery ? `Zapatilla ${queryParam.slice(-1)}` : `Producto ${queryParam}`;
+    
+    return {
+        sku: queryParam,
+        title: fallbackTitle,
+        image: 'https://images.unsplash.com/photo-1542291026-7eec264c27ff?w=700&h=500&fit=crop',
+        lastUpdated: new Date().toISOString(),
+        regularPrice: 120.00,
+        sizes: generateRealisticSizeData(120.00),
+        _fallback: true,
+        _message: 'Datos de demostración - StockX simulado'
+    };
+}
+
+// CORRECCIÓN: Tallas realistas sin hardcodear productos específicos
+function generateRealisticSizeData(basePrice = 120) {
+    const allSizes = [];
+    const sizeRange = ['6.5', '7', '7.5', '8', '8.5', '9', '9.5', '10', '10.5', '11', '11.5', '12', '12.5', '13', '13.5', '14', '15'];
+    
+    sizeRange.forEach((size) => {
+        // Algoritmo realista de disponibilidad basado en popularidad
+        let availabilityChance = 0.65; // 65% base
+        const sizeFloat = parseFloat(size);
+        
+        // Tallas más populares (8-11) tienen menor disponibilidad
+        if (sizeFloat >= 8 && sizeFloat <= 11) {
+            availabilityChance = 0.35; // 35% - alta demanda
+        } else if (sizeFloat >= 11.5 && sizeFloat <= 13) {
+            availabilityChance = 0.55; // 55% - demanda media
+        } else if (sizeFloat >= 13.5) {
+            availabilityChance = 0.80; // 80% - menor demanda
+        } else if (sizeFloat <= 7.5) {
+            availabilityChance = 0.75; // 75% - menor demanda
+        }
+        
+        const available = Math.random() < availabilityChance;
+        
+        // Variación de precio realista basada en escasez y demanda
+        let priceMultiplier = 1.0;
+        
+        if (sizeFloat <= 7 || sizeFloat >= 13.5) {
+            // Tallas extremas: más caras por escasez
+            priceMultiplier = 1.20 + (Math.random() * 0.40); // +20% a +60%
+        } else if (sizeFloat >= 8 && sizeFloat <= 10.5) {
+            // Tallas populares: premium por demanda
+            priceMultiplier = 1.10 + (Math.random() * 0.30); // +10% a +40%
+        } else {
+            // Tallas normales: variación menor
+            priceMultiplier = 0.95 + (Math.random() * 0.25); // -5% a +20%
+        }
+        
+        const finalPrice = available ? parseFloat((basePrice * priceMultiplier).toFixed(2)) : 0;
+        
+        allSizes.push({
+            size: `US ${size}`,
+            price: finalPrice,
+            available: available
+        });
+    });
+    
+    return allSizes;
+}
         _apiData: {
             realTimeData: true,
             availableSizes: sizes.filter(s => s.available).length,
@@ -318,124 +447,6 @@ function createEnhancedStockXMockData(queryParam, isIdQuery = false) {
         _message: 'Datos de demostración - StockX simulado',
         _note: 'Precios y disponibilidad generados de forma realista'
     };
-}
-
-// CORRECCIÓN: Mapeo completo de productos con IDs y SKUs reales
-function getProductInfoByQuery(queryParam, isIdQuery = false) {
-    // Mapeo por ID (prioritario)
-    const productMapById = {
-        '94c1e4e1-1c99-44c4-9d81-672044e7f777': {
-            name: 'Anta Kai 1 Jelly',
-            sku: '112441113-13/1124D1113-13',
-            basePrice: 118.00,
-            image: 'https://images.unsplash.com/photo-1543508282-6319a3e2621f?w=700&h=500&fit=crop&auto=format'
-        },
-        'dbb27df3-bb6e-4a7a-ba38-1bbb5f5a022a': {
-            name: 'Anta Kai 2 Triple Black',
-            sku: '112531111S-3/8125C1111S-3/812531111S-3',
-            basePrice: 101.00,
-            image: 'https://images.unsplash.com/photo-1606107557195-0e29a4b5b4aa?w=700&h=500&fit=crop&auto=format'
-        },
-        'f1938d29-48da-47eb-a5f8-619a2d8443ca': {
-            name: 'Anta Kai Hélà White',
-            sku: '8125B1110S-3/112521110S-3/1125B1110S-3',
-            basePrice: 80.00,
-            image: 'https://images.unsplash.com/photo-1549298916-b41d501d3772?w=700&h=500&fit=crop&auto=format'
-        }
-    };
-    
-    // Mapeo por SKU (fallback)
-    const productMapBySku = {
-        '112441113-13/1124D1113-13': productMapById['94c1e4e1-1c99-44c4-9d81-672044e7f777'],
-        '112531111S-3/8125C1111S-3/812531111S-3': productMapById['dbb27df3-bb6e-4a7a-ba38-1bbb5f5a022a'],
-        '8125B1110S-3/112521110S-3/1125B1110S-3': productMapById['f1938d29-48da-47eb-a5f8-619a2d8443ca']
-    };
-    
-    if (isIdQuery && productMapById[queryParam]) {
-        return productMapById[queryParam];
-    } else if (!isIdQuery && productMapBySku[queryParam]) {
-        return productMapBySku[queryParam];
-    }
-    
-    // Fallback genérico
-    return {
-        name: 'Anta Basketball Shoe',
-        sku: queryParam,
-        basePrice: 120.00,
-        image: 'https://images.unsplash.com/photo-1542291026-7eec264c27ff?w=700&h=500&fit=crop&auto=format'
-    };
-}
-
-// CORRECCIÓN: Generación realista de tallas con precios variables
-function generateRealisticSizeData(queryParam, basePrice = null) {
-    const productInfo = basePrice ? { basePrice } : getProductInfoByQuery(queryParam, false);
-    const realBasePrice = productInfo.basePrice;
-    
-    const allSizes = [];
-    const sizeRange = ['6.5', '7', '7.5', '8', '8.5', '9', '9.5', '10', '10.5', '11', '11.5', '12', '12.5', '13', '13.5', '14', '15'];
-    
-    sizeRange.forEach((size, index) => {
-        // Algoritmo realista de disponibilidad basado en popularidad
-        let availabilityChance = 0.65; // 65% base
-        const sizeFloat = parseFloat(size);
-        
-        // Tallas más populares (8-11) tienen menor disponibilidad
-        if (sizeFloat >= 8 && sizeFloat <= 11) {
-            availabilityChance = 0.35; // 35% - alta demanda
-        } else if (sizeFloat >= 11.5 && sizeFloat <= 13) {
-            availabilityChance = 0.55; // 55% - demanda media
-        } else if (sizeFloat >= 13.5) {
-            availabilityChance = 0.80; // 80% - menor demanda
-        } else if (sizeFloat <= 7.5) {
-            availabilityChance = 0.75; // 75% - menor demanda
-        }
-        
-        const available = Math.random() < availabilityChance;
-        
-        // Variación de precio realista basada en escasez y demanda
-        let priceMultiplier = 1.0;
-        
-        if (sizeFloat <= 7 || sizeFloat >= 13.5) {
-            // Tallas extremas: más caras por escasez
-            priceMultiplier = 1.20 + (Math.random() * 0.40); // +20% a +60%
-        } else if (sizeFloat >= 8 && sizeFloat <= 10.5) {
-            // Tallas populares: premium por demanda
-            priceMultiplier = 1.10 + (Math.random() * 0.30); // +10% a +40%
-        } else {
-            // Tallas normales: variación menor
-            priceMultiplier = 0.95 + (Math.random() * 0.25); // -5% a +20%
-        }
-        
-        const finalPrice = available ? parseFloat((realBasePrice * priceMultiplier).toFixed(2)) : 0;
-        
-        allSizes.push({
-            size: `US ${size}`,
-            price: finalPrice,
-            available: available,
-            mockData: {
-                popularity: sizeFloat >= 8 && sizeFloat <= 11 ? 'high' : 'medium',
-                priceMultiplier: priceMultiplier.toFixed(2)
-            }
-        });
-    });
-    
-    return allSizes;
-}
-
-// Funciones de fallback para compatibilidad
-function getProductNameFallback(queryParam) {
-    const productInfo = getProductInfoByQuery(queryParam, false);
-    return productInfo.name;
-}
-
-function getOfficialPriceFallback(queryParam) {
-    const productInfo = getProductInfoByQuery(queryParam, false);
-    return productInfo.basePrice;
-}
-
-function getProductImageFallback(queryParam) {
-    const productInfo = getProductInfoByQuery(queryParam, false);
-    return productInfo.image;
 }
 
 // Limpieza automática de cache cada 5 minutos

@@ -13,8 +13,16 @@ function isCacheValid(cacheEntry) {
 }
 
 export const handler = async (event) => {
+    console.log('🔥 INICIO DE FUNCIÓN NETLIFY - kicksdb.js');
+    console.log('📋 Event details:', {
+        httpMethod: event.httpMethod,
+        queryStringParameters: event.queryStringParameters,
+        headers: event.headers ? Object.keys(event.headers) : 'none'
+    });
+    
     // Handle CORS preflight
     if (event.httpMethod === 'OPTIONS') {
+        console.log('⚠️ Handling CORS preflight request');
         return {
             statusCode: 200,
             headers: {
@@ -27,6 +35,7 @@ export const handler = async (event) => {
     }
 
     if (event.httpMethod !== 'GET') {
+        console.log('❌ Method not allowed:', event.httpMethod);
         return {
             statusCode: 405,
             headers: {
@@ -39,7 +48,10 @@ export const handler = async (event) => {
 
     const { sku, id, market = 'US' } = event.queryStringParameters || {};
     
+    console.log('📊 Parámetros recibidos:', { sku, id, market });
+    
     if (!sku && !id) {
+        console.log('❌ No se recibió SKU ni ID');
         return {
             statusCode: 400,
             headers: {
@@ -54,10 +66,13 @@ export const handler = async (event) => {
     const queryParam = id || sku;
     const isIdQuery = !!id;
     const cacheKey = getCacheKey(queryParam, market);
+    
+    console.log('🔑 Query details:', { queryParam, isIdQuery, cacheKey });
+    
     const cachedData = cache.get(cacheKey);
 
     if (isCacheValid(cachedData)) {
-        console.log(`Cache hit for ${cacheKey}`);
+        console.log('✅ CACHE HIT - Devolviendo datos cacheados');
         return {
             statusCode: 200,
             headers: {
@@ -70,8 +85,14 @@ export const handler = async (event) => {
 
     const apiKey = process.env.KICKSDB_API_KEY;
     
+    console.log('🔐 API Key check:', {
+        hasApiKey: !!apiKey,
+        keyLength: apiKey ? apiKey.length : 0,
+        keyStart: apiKey ? apiKey.substring(0, 10) + '...' : 'NONE'
+    });
+    
     if (!apiKey) {
-        console.log('KICKSDB_API_KEY not found, using fallback data');
+        console.log('❌ NO API KEY FOUND - Using fallback data');
         const productData = createFallbackData(queryParam, isIdQuery);
         
         cache.set(cacheKey, {
@@ -90,7 +111,7 @@ export const handler = async (event) => {
     }
 
     try {
-        console.log(`Fetching StockX data for: ${isIdQuery ? `ID: ${id}` : `SKU: ${sku}`}`);
+        console.log(`🌐 HACIENDO PETICIÓN A STOCKX API para: ${isIdQuery ? `ID: ${id}` : `SKU: ${sku}`}`);
         
         // Endpoint correcto según el tipo de consulta
         let apiEndpoint;
@@ -100,7 +121,7 @@ export const handler = async (event) => {
             apiEndpoint = `https://api.kicks.dev/v3/stockx/products?query=${encodeURIComponent(sku)}&limit=3`;
         }
         
-        console.log(`Using endpoint: ${apiEndpoint}`);
+        console.log(`🎯 URL de la API: ${apiEndpoint}`);
         
         const response = await fetch(apiEndpoint, {
             method: 'GET',
@@ -111,24 +132,47 @@ export const handler = async (event) => {
             }
         });
         
-        console.log(`Response status: ${response.status}`);
+        console.log(`📡 Respuesta de StockX API:`, {
+            status: response.status,
+            statusText: response.statusText,
+            ok: response.ok,
+            headers: response.headers ? 'present' : 'none'
+        });
         
         if (response.ok) {
             const data = await response.json();
-            console.log('StockX API response received successfully');
+            console.log('✅ JSON recibido de StockX API exitosamente');
+            console.log('📋 Estructura de datos:', {
+                hasProduct: !!data.product,
+                hasData: !!data.data,
+                dataLength: data.data ? data.data.length : 0,
+                keys: Object.keys(data)
+            });
             
             let productData;
             if (isIdQuery && data.product) {
-                // Respuesta directa por ID
+                console.log('🎯 Procesando respuesta directa por ID');
+                console.log('📊 Product data:', {
+                    id: data.product.id,
+                    title: data.product.title,
+                    hasVariants: !!data.product.variants,
+                    variantsCount: data.product.variants ? data.product.variants.length : 0
+                });
                 productData = normalizeStockXResponse(data.product);
             } else if (!isIdQuery && data.data && data.data.length > 0) {
-                // Búsqueda por SKU - tomar el primer resultado
+                console.log('🔍 Procesando búsqueda por SKU - tomando primer resultado');
                 productData = normalizeStockXResponse(data.data[0]);
             } else {
+                console.log('❌ No se encontraron datos de producto en la respuesta');
                 throw new Error('No product data found in API response');
             }
             
-            console.log(`Processed product: ${productData.title} with ${productData.sizes.filter(s => s.available).length} available sizes`);
+            console.log('✅ DATOS PROCESADOS EXITOSAMENTE:', {
+                title: productData.title,
+                sizesTotal: productData.sizes.length,
+                sizesAvailable: productData.sizes.filter(s => s.available).length,
+                hasRealData: !productData._fallback
+            });
             
             cache.set(cacheKey, {
                 data: productData,
@@ -144,14 +188,23 @@ export const handler = async (event) => {
                 body: JSON.stringify(productData)
             };
         } else {
-            const errorData = await response.json().catch(() => ({}));
-            throw new Error(`StockX API returned ${response.status}: ${errorData.message || 'Unknown error'}`);
+            const errorText = await response.text().catch(() => 'No error text');
+            console.log('❌ StockX API devolvió error:', {
+                status: response.status,
+                statusText: response.statusText,
+                errorText: errorText.substring(0, 200)
+            });
+            throw new Error(`StockX API returned ${response.status}: ${response.statusText}`);
         }
         
     } catch (error) {
-        console.error('Error fetching from StockX API:', error.message);
+        console.error('💥 ERROR EN PETICIÓN A STOCKX:', {
+            message: error.message,
+            stack: error.stack ? error.stack.substring(0, 300) : 'No stack'
+        });
         
         // Fallback a datos simulados
+        console.log('🔄 Activando fallback debido al error');
         const productData = createFallbackData(queryParam, isIdQuery);
         
         cache.set(cacheKey, {

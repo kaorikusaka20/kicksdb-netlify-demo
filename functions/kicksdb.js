@@ -1,11 +1,11 @@
 // KicksDB PRO Plan API Integration - Netlify Function
-// Uses real-time StockX data with proper size handling
+// Uses real-time StockX data with proper ID/SKU handling
 
 const cache = new Map();
 const CACHE_TTL = 60 * 1000; // 1 minuto para datos en tiempo real
 
-function getCacheKey(sku, market = 'US') {
-    return `${sku}-${market}`;
+function getCacheKey(query, market = 'US') {
+    return `${query}-${market}`;
 }
 
 function isCacheValid(cacheEntry) {
@@ -50,7 +50,9 @@ export const handler = async (event) => {
         };
     }
 
+    // CORRECCIÓN: Priorizar ID sobre SKU
     const queryParam = id || sku;
+    const isIdQuery = !!id;
     const cacheKey = getCacheKey(queryParam, market);
     const cachedData = cache.get(cacheKey);
 
@@ -69,8 +71,8 @@ export const handler = async (event) => {
     const apiKey = process.env.KICKSDB_API_KEY;
     
     if (!apiKey) {
-        console.log('KICKSDB_API_KEY not found, using fallback data');
-        const productData = createStockXMockData(sku);
+        console.log('KICKSDB_API_KEY not found, using enhanced fallback data');
+        const productData = createEnhancedStockXMockData(queryParam, isIdQuery);
         
         cache.set(cacheKey, {
             data: productData,
@@ -88,24 +90,26 @@ export const handler = async (event) => {
     }
 
     try {
-        console.log(`Fetching real-time StockX data for: ${id ? `ID: ${id}` : `SKU: ${sku}`}`);
+        console.log(`Fetching real-time StockX data for: ${isIdQuery ? `ID: ${id}` : `SKU: ${sku}`}`);
         
-        // USAR ID si está disponible, sino SKU
-        let searchEndpoint;
-        if (id && id !== 'TBD-PRODUCT-ID-2' && id !== 'TBD-PRODUCT-ID-3') {
-            searchEndpoint = `https://api.kicks.dev/v3/stockx/products/${id}`;
+        // CORRECCIÓN: Endpoints correctos según el tipo de consulta
+        let apiEndpoint;
+        if (isIdQuery) {
+            // Consulta por ID específico
+            apiEndpoint = `https://api.kicks.dev/v3/stockx/products/${id}`;
         } else {
-            searchEndpoint = `https://api.kicks.dev/v3/stockx/products?query=${encodeURIComponent(sku)}&limit=5`;
+            // Búsqueda por SKU
+            apiEndpoint = `https://api.kicks.dev/v3/stockx/products?query=${encodeURIComponent(sku)}&limit=3`;
         }
         
-        console.log(`Using endpoint: ${searchEndpoint}`);
+        console.log(`Using endpoint: ${apiEndpoint}`);
         
-        const response = await fetch(searchEndpoint, {
+        const response = await fetch(apiEndpoint, {
             method: 'GET',
             headers: {
                 'Authorization': `Bearer ${apiKey}`,
                 'Content-Type': 'application/json',
-                'User-Agent': 'Courts-StockX-App/1.0'
+                'User-Agent': 'Courts-StockX-App/1.2'
             }
         });
         
@@ -113,20 +117,21 @@ export const handler = async (event) => {
         
         if (response.ok) {
             const data = await response.json();
-            console.log('StockX API response received');
+            console.log('StockX API response received successfully');
             
-            // MANEJAR respuesta directa por ID o búsqueda por SKU
             let productData;
-            if (data.product) {
+            if (isIdQuery && data.product) {
                 // Respuesta directa por ID
-                productData = normalizeStockXResponse(data, queryParam);
-            } else if (data.data && data.data.length > 0) {
-                // Búsqueda por SKU
-                const bestMatch = findBestMatch(data.data, sku);
-                productData = normalizeStockXResponse({product: bestMatch}, queryParam);
+                productData = normalizeStockXResponse(data.product, queryParam, true);
+            } else if (!isIdQuery && data.data && data.data.length > 0) {
+                // Búsqueda por SKU - encontrar mejor coincidencia
+                const bestMatch = findBestSkuMatch(data.data, sku);
+                productData = normalizeStockXResponse(bestMatch, queryParam, false);
             } else {
-                throw new Error('No product data found in response');
+                throw new Error('No product data found in API response');
             }
+            
+            console.log(`✅ Processed product: ${productData.title} with ${productData.sizes.filter(s => s.available).length} available sizes`);
             
             cache.set(cacheKey, {
                 data: productData,
@@ -142,14 +147,15 @@ export const handler = async (event) => {
                 body: JSON.stringify(productData)
             };
         } else {
-            throw new Error(`StockX API returned ${response.status}`);
+            const errorData = await response.json().catch(() => ({}));
+            throw new Error(`StockX API returned ${response.status}: ${errorData.message || 'Unknown error'}`);
         }
         
     } catch (error) {
-        console.error('Error fetching from StockX API:', error);
+        console.error('Error fetching from StockX API:', error.message);
         
-        // Fallback a datos mock
-        const productData = createStockXMockData(queryParam);
+        // Fallback a datos mock pero con información mejorada
+        const productData = createEnhancedStockXMockData(queryParam, isIdQuery);
         
         cache.set(cacheKey, {
             data: productData,
@@ -167,93 +173,124 @@ export const handler = async (event) => {
     }
 };
 
-// Encontrar mejor coincidencia del SKU
-function findBestMatch(products, targetSku) {
+// CORRECCIÓN: Mejor algoritmo de coincidencia para SKUs
+function findBestSkuMatch(products, targetSku) {
     const targetParts = targetSku.toLowerCase().split('/').map(part => part.trim());
+    let bestMatch = products[0];
+    let bestScore = 0;
     
-    return products.reduce((best, product) => {
+    products.forEach(product => {
         const productSku = (product.sku || '').toLowerCase();
         let score = 0;
         
+        // Puntuación por coincidencias exactas
         targetParts.forEach(part => {
             if (productSku.includes(part)) {
-                score++;
+                score += 2;
             }
         });
         
-        return score > best.score ? { product, score } : best;
-    }, { product: products[0], score: 0 }).product;
+        // Puntuación adicional por coincidencia de título
+        const productTitle = (product.title || '').toLowerCase();
+        if (productTitle.includes('anta') && productTitle.includes('kai')) {
+            score += 1;
+        }
+        
+        if (score > bestScore) {
+            bestScore = score;
+            bestMatch = product;
+        }
+    });
+    
+    console.log(`Best match for SKU "${targetSku}": "${bestMatch.title}" with score ${bestScore}`);
+    return bestMatch;
 }
 
-function normalizeStockXResponse(data, sku) {
-    console.log('Normalizando respuesta REAL de StockX API...');
+// CORRECCIÓN: Normalización mejorada que usa datos reales de la API
+function normalizeStockXResponse(product, queryParam, isDirectId = false) {
+    console.log(`Normalizing ${isDirectId ? 'direct ID' : 'search'} response from StockX API...`);
     
-    // 1. CORRECCIÓN: Usar estructura del JSON real
-    const product = data.product || data;
+    // 1. TÍTULO: Usar el título real de la API StockX
+    const title = product.title || getProductNameFallback(queryParam);
     
-    // 2. Precio Base: usar min_price del producto
-    const basePrice = product.min_price || getOfficialPriceBySku(sku);
+    // 2. SKU: Usar el SKU real de la API
+    const sku = product.sku || queryParam;
     
-    // 3. Extraer tallas REALES de variants
-    const sizes = extractRealStockXVariants(product.variants, sku);
+    // 3. PRECIO BASE: Usar lowest_price o min_price de StockX
+    const basePrice = product.lowest_price || product.min_price || getOfficialPriceFallback(queryParam);
     
-    // 4. Imagen REAL de StockX
-    const image = product.image || getProductImageBySku(sku);
+    // 4. IMAGEN: Usar imagen real de StockX
+    const image = product.image || getProductImageFallback(queryParam);
+    
+    // 5. TALLAS: Extraer variantes reales
+    const sizes = extractStockXVariants(product.variants, queryParam);
+    
+    // 6. METADATOS: Información adicional de StockX
+    const lastUpdated = product.updated_at || new Date().toISOString();
 
     return {
-        sku: product.sku || sku,
-        title: product.title || getProductNameBySku(sku),
+        sku: sku,
+        title: title, // CORRECCIÓN: Ahora usa el título real de la API
         image: image,
-        lastUpdated: product.updated_at || new Date().toISOString(),
+        lastUpdated: lastUpdated,
         regularPrice: basePrice,
         sizes: sizes,
-        _source: 'StockX API - Datos Reales',
-        _features: {
+        _source: 'StockX API - Datos en Tiempo Real',
+        _apiData: {
             realTimeData: true,
             availableSizes: sizes.filter(s => s.available).length,
             totalSizes: sizes.length,
-            minPrice: product.min_price,
-            maxPrice: product.max_price,
-            weeklyOrders: product.weekly_orders
+            lowestPrice: product.lowest_price,
+            highestPrice: product.highest_price,
+            weeklyOrders: product.weekly_orders,
+            totalOrders: product.total_orders
         }
     };
 }
 
-function extractRealStockXVariants(variants, sku) {
+// CORRECCIÓN: Extracción mejorada de variantes con precios reales
+function extractStockXVariants(variants, queryParam) {
     if (!variants || !Array.isArray(variants)) {
-        console.log('No variants found, using fallback data');
-        return generateRealisticSizesWithPrices(sku);
+        console.log('No variants found, generating realistic fallback data');
+        return generateRealisticSizeData(queryParam);
     }
     
     console.log(`Processing ${variants.length} real variants from StockX API`);
     const sizes = [];
     
     variants.forEach(variant => {
-        // DATOS REALES del JSON: lowest_ask y total_asks
-        const lowestAsk = variant.lowest_ask || 0;
-        const totalAsks = variant.total_asks || 0;
+        // Datos reales de StockX: lowest_ask, total_asks, sales data
+        const lowestAsk = variant.lowest_ask || variant.price || 0;
+        const totalAsks = variant.total_asks || variant.asks || 0;
+        const sales15Days = variant.sales_count_15_days || 0;
         
-        // Disponibilidad REAL: debe tener precio Y ofertas
-        const available = lowestAsk > 0 && totalAsks > 0;
+        // Lógica de disponibilidad mejorada:
+        // - Debe tener precio válido (> 0)
+        // - Debe tener ofertas disponibles O ventas recientes
+        const available = lowestAsk > 0 && (totalAsks > 0 || sales15Days > 0);
         
-        console.log(`Talla ${variant.size}: ${lowestAsk}, ${totalAsks} offers, available: ${available}`);
+        const sizeUS = variant.size || variant.us_size || 'N/A';
+        
+        console.log(`Size ${sizeUS}: ${lowestAsk}, ${totalAsks} asks, ${sales15Days} sales, available: ${available}`);
         
         sizes.push({
-            size: `US ${variant.size}`,
+            size: `US ${sizeUS}`,
             price: available ? parseFloat(lowestAsk.toFixed(2)) : 0,
             available: available,
-            realData: {
+            stockxData: {
                 lowest_ask: lowestAsk,
+                highest_bid: variant.highest_bid || 0,
                 total_asks: totalAsks,
-                previous_lowest_ask: variant.previous_lowest_ask,
-                sales_15_days: variant.sales_count_15_days,
-                sales_30_days: variant.sales_count_30_days,
-                sales_60_days: variant.sales_count_60_days
+                total_bids: variant.total_bids || 0,
+                sales_15_days: sales15Days,
+                sales_30_days: variant.sales_count_30_days || 0,
+                last_sale: variant.last_sale_price || 0,
+                price_premium: variant.price_premium || 0
             }
         });
     });
     
-    // Ordenar por talla
+    // Ordenar por talla numéricamente
     sizes.sort((a, b) => {
         const sizeA = parseFloat(a.size.replace('US ', ''));
         const sizeB = parseFloat(b.size.replace('US ', ''));
@@ -264,111 +301,151 @@ function extractRealStockXVariants(variants, sku) {
     return sizes;
 }
 
-// CORRECCIÓN: Generar tallas realistas con precios variables por SKU
-function generateRealisticSizesWithPrices(sku) {
+// CORRECCIÓN: Mock data mejorado basado en IDs reales
+function createEnhancedStockXMockData(queryParam, isIdQuery = false) {
+    console.log(`Creating enhanced mock data for ${isIdQuery ? 'ID' : 'SKU'}: ${queryParam}`);
+    
+    const productInfo = getProductInfoByQuery(queryParam, isIdQuery);
+    
+    return {
+        sku: productInfo.sku,
+        title: productInfo.name, // CORRECCIÓN: Usar nombres reales según el ID/SKU
+        image: productInfo.image,
+        lastUpdated: new Date().toISOString(),
+        regularPrice: productInfo.basePrice,
+        sizes: generateRealisticSizeData(queryParam, productInfo.basePrice),
+        _fallback: true,
+        _message: 'Datos de demostración - StockX simulado',
+        _note: 'Precios y disponibilidad generados de forma realista'
+    };
+}
+
+// CORRECCIÓN: Mapeo completo de productos con IDs y SKUs reales
+function getProductInfoByQuery(queryParam, isIdQuery = false) {
+    // Mapeo por ID (prioritario)
+    const productMapById = {
+        '94c1e4e1-1c99-44c4-9d81-672044e7f777': {
+            name: 'Anta Kai 1 Jelly',
+            sku: '112441113-13/1124D1113-13',
+            basePrice: 118.00,
+            image: 'https://images.unsplash.com/photo-1543508282-6319a3e2621f?w=700&h=500&fit=crop&auto=format'
+        },
+        'dbb27df3-bb6e-4a7a-ba38-1bbb5f5a022a': {
+            name: 'Anta Kai 2 Triple Black',
+            sku: '112531111S-3/8125C1111S-3/812531111S-3',
+            basePrice: 101.00,
+            image: 'https://images.unsplash.com/photo-1606107557195-0e29a4b5b4aa?w=700&h=500&fit=crop&auto=format'
+        },
+        'f1938d29-48da-47eb-a5f8-619a2d8443ca': {
+            name: 'Anta Kai Hélà White',
+            sku: '8125B1110S-3/112521110S-3/1125B1110S-3',
+            basePrice: 80.00,
+            image: 'https://images.unsplash.com/photo-1549298916-b41d501d3772?w=700&h=500&fit=crop&auto=format'
+        }
+    };
+    
+    // Mapeo por SKU (fallback)
+    const productMapBySku = {
+        '112441113-13/1124D1113-13': productMapById['94c1e4e1-1c99-44c4-9d81-672044e7f777'],
+        '112531111S-3/8125C1111S-3/812531111S-3': productMapById['dbb27df3-bb6e-4a7a-ba38-1bbb5f5a022a'],
+        '8125B1110S-3/112521110S-3/1125B1110S-3': productMapById['f1938d29-48da-47eb-a5f8-619a2d8443ca']
+    };
+    
+    if (isIdQuery && productMapById[queryParam]) {
+        return productMapById[queryParam];
+    } else if (!isIdQuery && productMapBySku[queryParam]) {
+        return productMapBySku[queryParam];
+    }
+    
+    // Fallback genérico
+    return {
+        name: 'Anta Basketball Shoe',
+        sku: queryParam,
+        basePrice: 120.00,
+        image: 'https://images.unsplash.com/photo-1542291026-7eec264c27ff?w=700&h=500&fit=crop&auto=format'
+    };
+}
+
+// CORRECCIÓN: Generación realista de tallas con precios variables
+function generateRealisticSizeData(queryParam, basePrice = null) {
+    const productInfo = basePrice ? { basePrice } : getProductInfoByQuery(queryParam, false);
+    const realBasePrice = productInfo.basePrice;
+    
     const allSizes = [];
     const sizeRange = ['6.5', '7', '7.5', '8', '8.5', '9', '9.5', '10', '10.5', '11', '11.5', '12', '12.5', '13', '13.5', '14', '15'];
     
-    // Precios base específicos por producto
-    const basePrices = {
-        '112441113-13/1124D1113-13': 118.00, // Anta Kai 1 Jelly
-        '112531111S-3/8125C1111S-3/812531111S-3': 101.00, // Anta Kai 2 Triple Black
-        '112511810S-1/1125A1810S-1/8125A1810S-1/112541810SF-1': 80.00 // Anta Kai Hélà White
-    };
-    
-    const basePrice = basePrices[sku] || 120.00;
-    
     sizeRange.forEach((size, index) => {
-        // Lógica realista de disponibilidad
-        // Tallas más populares (8-11) tienen menos stock
-        // Tallas extremas (6.5, 14+) tienen más stock pero precios más altos
+        // Algoritmo realista de disponibilidad basado en popularidad
         let availabilityChance = 0.65; // 65% base
+        const sizeFloat = parseFloat(size);
         
-        if (parseFloat(size) >= 8 && parseFloat(size) <= 11) {
-            availabilityChance = 0.4; // Tallas populares - menos stock
-        } else if (parseFloat(size) >= 13) {
-            availabilityChance = 0.75; // Tallas grandes - más stock
+        // Tallas más populares (8-11) tienen menor disponibilidad
+        if (sizeFloat >= 8 && sizeFloat <= 11) {
+            availabilityChance = 0.35; // 35% - alta demanda
+        } else if (sizeFloat >= 11.5 && sizeFloat <= 13) {
+            availabilityChance = 0.55; // 55% - demanda media
+        } else if (sizeFloat >= 13.5) {
+            availabilityChance = 0.80; // 80% - menor demanda
+        } else if (sizeFloat <= 7.5) {
+            availabilityChance = 0.75; // 75% - menor demanda
         }
         
         const available = Math.random() < availabilityChance;
         
-        // Variación de precio realista
+        // Variación de precio realista basada en escasez y demanda
         let priceMultiplier = 1.0;
         
-        // Tallas pequeñas y grandes cuestan más
-        if (parseFloat(size) <= 7 || parseFloat(size) >= 13) {
-            priceMultiplier = 1.15 + (Math.random() * 0.3); // +15-45%
-        } else if (parseFloat(size) >= 8 && parseFloat(size) <= 11) {
-            priceMultiplier = 0.95 + (Math.random() * 0.2); // -5% a +15%
+        if (sizeFloat <= 7 || sizeFloat >= 13.5) {
+            // Tallas extremas: más caras por escasez
+            priceMultiplier = 1.20 + (Math.random() * 0.40); // +20% a +60%
+        } else if (sizeFloat >= 8 && sizeFloat <= 10.5) {
+            // Tallas populares: premium por demanda
+            priceMultiplier = 1.10 + (Math.random() * 0.30); // +10% a +40%
         } else {
-            priceMultiplier = 1.0 + (Math.random() * 0.25); // 0% a +25%
+            // Tallas normales: variación menor
+            priceMultiplier = 0.95 + (Math.random() * 0.25); // -5% a +20%
         }
         
-        const finalPrice = available ? parseFloat((basePrice * priceMultiplier).toFixed(2)) : 0;
+        const finalPrice = available ? parseFloat((realBasePrice * priceMultiplier).toFixed(2)) : 0;
         
         allSizes.push({
             size: `US ${size}`,
             price: finalPrice,
-            available: available
+            available: available,
+            mockData: {
+                popularity: sizeFloat >= 8 && sizeFloat <= 11 ? 'high' : 'medium',
+                priceMultiplier: priceMultiplier.toFixed(2)
+            }
         });
     });
     
     return allSizes;
 }
 
-// Datos mock mejorados basados en StockX
-function createStockXMockData(sku) {
-    const productName = getProductNameBySku(sku);
-    const basePrice = getOfficialPriceBySku(sku);
-    
-    return {
-        sku: sku,
-        title: productName,
-        image: getProductImageBySku(sku),
-        lastUpdated: new Date().toISOString(),
-        regularPrice: basePrice,
-        sizes: generateRealisticSizesWithPrices(sku),
-        _fallback: true,
-        _message: 'Datos de demostración - StockX simulado',
-        _note: 'Precios y disponibilidad simulados de forma realista'
-    };
+// Funciones de fallback para compatibilidad
+function getProductNameFallback(queryParam) {
+    const productInfo = getProductInfoByQuery(queryParam, false);
+    return productInfo.name;
 }
 
-// Helper functions
-function getOfficialPriceBySku(sku) {
-    const priceMap = {
-        '112441113-13/1124D1113-13': 118.00,
-        '112531111S-3/8125C1111S-3/812531111S-3': 101.00,
-        '112511810S-1/1125A1810S-1/8125A1810S-1/112541810SF-1': 80.00
-    };
-    return priceMap[sku] || 120.00;
+function getOfficialPriceFallback(queryParam) {
+    const productInfo = getProductInfoByQuery(queryParam, false);
+    return productInfo.basePrice;
 }
 
-function getProductNameBySku(sku) {
-    const nameMap = {
-        '112441113-13/1124D1113-13': 'Anta Kai 1 Jelly',
-        '112531111S-3/8125C1111S-3/812531111S-3': 'Anta Kai 2 Triple Black',
-        '112511810S-1/1125A1810S-1/8125A1810S-1/112541810SF-1': 'Anta Kai Hélà White'
-    };
-    return nameMap[sku] || 'Anta Basketball Shoe';
+function getProductImageFallback(queryParam) {
+    const productInfo = getProductInfoByQuery(queryParam, false);
+    return productInfo.image;
 }
 
-function getProductImageBySku(sku) {
-    // Imágenes optimizadas para el diseño de la aplicación
-    const imageMap = {
-        '112441113-13/1124D1113-13': 'https://images.unsplash.com/photo-1543508282-6319a3e2621f?w=700&h=500&fit=crop&auto=format',
-        '112531111S-3/8125C1111S-3/812531111S-3': 'https://images.unsplash.com/photo-1606107557195-0e29a4b5b4aa?w=700&h=500&fit=crop&auto=format',
-        '112511810S-1/1125A1810S-1/8125A1810S-1/112541810SF-1': 'https://images.unsplash.com/photo-1549298916-b41d501d3772?w=700&h=500&fit=crop&auto=format'
-    };
-    return imageMap[sku] || 'https://images.unsplash.com/photo-1542291026-7eec264c27ff?w=700&h=500&fit=crop&auto=format';
-}
-
-// Limpieza de cache
+// Limpieza automática de cache cada 5 minutos
 setInterval(() => {
     const now = Date.now();
     for (const [key, entry] of cache.entries()) {
-        if (now - entry.timestamp > CACHE_TTL) {
+        if (now - entry.timestamp > CACHE_TTL * 5) { // Limpiar entradas de más de 5 minutos
             cache.delete(key);
+            console.log(`Cache entry expired and removed: ${key}`);
         }
     }
+    console.log(`Cache cleanup completed. Current cache size: ${cache.size}`);
 }, 5 * 60 * 1000);

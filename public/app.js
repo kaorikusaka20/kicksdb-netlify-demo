@@ -1,22 +1,16 @@
 // COURTS Sneaker Catalog App - StockX Integration
 // Muestra todas las tallas, pero solo habilita las disponibles
 
-// Product Configuration - CORREGIDO: IDs y SKUs actualizados
+// Product Configuration - SOLO IDs (nombres se obtienen de la API)
 const PRODUCTS = [
     {
-        name: 'Anta Kai 1 Jelly',
-        id: '94c1e4e1-1c99-44c4-9d81-672044e7f777',
-        sku: '112441113-13/1124D1113-13'
+        id: '94c1e4e1-1c99-44c4-9d81-672044e7f777'
     },
     {
-        name: 'Anta Kai 2 Triple Black',  
-        id: 'dbb27df3-bb6e-4a7a-ba38-1bbb5f5a022a',
-        sku: '112531111S-3/8125C1111S-3/812531111S-3'
+        id: 'dbb27df3-bb6e-4a7a-ba38-1bbb5f5a022a'
     },
     {
-        name: 'Anta Kai Hélà White',
-        id: 'f1938d29-48da-47eb-a5f8-619a2d8443ca', // ID CORREGIDO
-        sku: '8125B1110S-3/112521110S-3/1125B1110S-3' // SKU CORREGIDO
+        id: '297427c6-73bd-414f-9535-e5739c0ed93f' // ID REAL del JSON (no el incorrecto)
     }
 ];
 
@@ -203,8 +197,47 @@ function createEnhancedFallback(product) {
 }
 
 function getProductImageById(productId) {
-    const imageMap = {
-        '94c1e4e1-1c99-44c4-9d81-672044e7f777': 'https://images.unsplash.com/photo-1543508282-6319a3e2621f?w=700&h=500&fit=crop&auto=format',
+    // Solo imágenes de fallback - las reales vienen de la API
+    return 'https://images.unsplash.com/photo-1542291026-7eec264c27ff?w=700&h=500&fit=crop&auto=format';
+}
+
+function generateAllSizesForProduct(basePrice) {
+    const allSizes = [];
+    const sizeRange = ['6.5', '7', '7.5', '8', '8.5', '9', '9.5', '10', '10.5', '11', '11.5', '12', '12.5', '13', '13.5', '14', '15'];
+    
+    sizeRange.forEach(size => {
+        const available = Math.random() > 0.4;
+        const priceVariation = (Math.random() * 30) - 15;
+        const price = available ? basePrice + priceVariation : 0;
+        
+        allSizes.push({
+            size: `US ${size}`,
+            price: parseFloat(price.toFixed(2)),
+            available: available
+        });
+    });
+    
+    return allSizes;
+}
+
+async function refreshProducts() {
+    const refreshIcon = elements.refreshBtn.querySelector('.refresh-icon');
+    refreshIcon.classList.add('spinning');
+    
+    try {
+        await loadAllProducts();
+        
+        if (__SELECTED_PRODUCT_SKU) {
+            renderProductDetail(__SELECTED_PRODUCT_SKU);
+        }
+        
+        showToast('Datos de StockX actualizados', 'success');
+    } catch (error) {
+        showToast('Error al actualizar datos', 'error');
+    } finally {
+        refreshIcon.classList.remove('spinning');
+    }
+}'https://images.unsplash.com/photo-1543508282-6319a3e2621f?w=700&h=500&fit=crop&auto=format',
         'dbb27df3-bb6e-4a7a-ba38-1bbb5f5a022a': 'https://images.unsplash.com/photo-1606107557195-0e29a4b5b4aa?w=700&h=500&fit=crop&auto=format',
         'f1938d29-48da-47eb-a5f8-619a2d8443ca': 'https://images.unsplash.com/photo-1549298916-b41d501d3772?w=700&h=500&fit=crop&auto=format'
     };
@@ -255,8 +288,7 @@ function renderCatalog() {
     grid.innerHTML = '';
     
     PRODUCTS.forEach(product => {
-        const productKey = product.id || product.sku;
-        const data = __PRODUCT_CACHE[productKey];
+        const data = __PRODUCT_CACHE[product.id];
         if (!data) return;
 
         // CORRECCIÓN: Usar el precio mínimo disponible o regular price
@@ -287,7 +319,7 @@ function renderCatalog() {
             </div>
         `;
         
-        card.addEventListener('click', () => goDetail(productKey));
+        card.addEventListener('click', () => goDetail(product.id));
         grid.appendChild(card);
     });
 }

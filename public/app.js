@@ -125,16 +125,12 @@ function showLoading(show = true) {
 }
 
 // API Functions - CORREGIDO: Priorizar ID real
-async function fetchProductData(productId, sku) {
+// API Functions - SOLO POR ID
+async function fetchProductData(productId) {
     try {
-        // CORRECCIÓN: Siempre usar ID si está disponible
-        const queryParam = productId 
-            ? `id=${encodeURIComponent(productId)}` 
-            : `sku=${encodeURIComponent(sku)}`;
-            
-        console.log(`🔍 Fetching: ${queryParam}`);
+        console.log(`🔍 Fetching by ID: ${productId}`);
         
-        const response = await fetch(`/.netlify/functions/kicksdb?${queryParam}&market=US`);
+        const response = await fetch(`/.netlify/functions/kicksdb?id=${encodeURIComponent(productId)}&market=US`);
         
         if (!response.ok) {
             throw new Error(`HTTP ${response.status}`);
@@ -144,7 +140,7 @@ async function fetchProductData(productId, sku) {
         console.log(`✅ Datos recibidos para: ${data.title} (${data.sizes.filter(s => s.available).length}/${data.sizes.length} tallas disponibles)`);
         return data;
     } catch (error) {
-        console.error(`Error fetching product ${productId || sku}:`, error);
+        console.error(`Error fetching product ${productId}:`, error);
         throw error;
     }
 }
@@ -155,16 +151,14 @@ async function loadAllProducts() {
     
     const loadPromises = PRODUCTS.map(async product => {
         try {
-            const data = await fetchProductData(product.id, product.sku);
-            const productKey = product.id || product.sku;
-            __PRODUCT_CACHE[productKey] = data;
+            const data = await fetchProductData(product.id);
+            __PRODUCT_CACHE[product.id] = data;
             
             console.log(`✅ ${data.title}: ${data._source || 'Datos cargados'} - ${data.sizes.filter(s => s.available).length} tallas disponibles`);
             
         } catch (error) {
             console.error(`Failed to load ${product.name}:`, error);
-            const productKey = product.id || product.sku;
-            __PRODUCT_CACHE[productKey] = createEnhancedFallback(product);
+            __PRODUCT_CACHE[product.id] = createEnhancedFallback(product);
             showToast(`Error cargando ${product.name} - Usando datos de respaldo`, 'warning');
         }
     });
@@ -185,8 +179,9 @@ function createEnhancedFallback(product) {
     const basePrice = officialPrices[product.name] || 120.00;
     
     return {
-        sku: product.sku,
-        title: product.name, // Usar el nombre del producto como fallback
+        id: product.id,
+        sku: product.id, // Usar ID como SKU en fallback
+        title: product.name,
         image: getProductImageById(product.id),
         lastUpdated: new Date().toISOString(),
         regularPrice: basePrice,
@@ -197,53 +192,13 @@ function createEnhancedFallback(product) {
 }
 
 function getProductImageById(productId) {
-    // Solo imágenes de fallback - las reales vienen de la API
-    return 'https://images.unsplash.com/photo-1542291026-7eec264c27ff?w=700&h=500&fit=crop&auto=format';
-}
-
-function generateAllSizesForProduct(basePrice) {
-    const allSizes = [];
-    const sizeRange = ['6.5', '7', '7.5', '8', '8.5', '9', '9.5', '10', '10.5', '11', '11.5', '12', '12.5', '13', '13.5', '14', '15'];
-    
-    sizeRange.forEach(size => {
-        const available = Math.random() > 0.4;
-        const priceVariation = (Math.random() * 30) - 15;
-        const price = available ? basePrice + priceVariation : 0;
-        
-        allSizes.push({
-            size: `US ${size}`,
-            price: parseFloat(price.toFixed(2)),
-            available: available
-        });
-    });
-    
-    return allSizes;
-}
-
-async function refreshProducts() {
-    const refreshIcon = elements.refreshBtn.querySelector('.refresh-icon');
-    refreshIcon.classList.add('spinning');
-    
-    try {
-        await loadAllProducts();
-        
-        if (__SELECTED_PRODUCT_SKU) {
-            renderProductDetail(__SELECTED_PRODUCT_SKU);
-        }
-        
-        showToast('Datos de StockX actualizados', 'success');
-    } catch (error) {
-        showToast('Error al actualizar datos', 'error');
-    } finally {
-        refreshIcon.classList.remove('spinning');
-    }
-}'https://images.unsplash.com/photo-1543508282-6319a3e2621f?w=700&h=500&fit=crop&auto=format',
-        'dbb27df3-bb6e-4a7a-ba38-1bbb5f5a022a': 'https://images.unsplash.com/photo-1606107557195-0e29a4b5b4aa?w=700&h=500&fit=crop&auto=format',
-        'f1938d29-48da-47eb-a5f8-619a2d8443ca': 'https://images.unsplash.com/photo-1549298916-b41d501d3772?w=700&h=500&fit=crop&auto=format'
+    const imageMap = {
+        'f1938d29-48da-47eb-a5f8-619a2d8443ca': 'https://images.unsplash.com/photo-1549298916-b41d501d3772?w=700&h=500&fit=crop',
+        'dbb27df3-bb6e-4a7a-ba38-1bbb5f5a022a': 'https://images.unsplash.com/photo-1606107557195-0e29a4b5b4aa?w=700&h=500&fit=crop',
+        '297427c6-73bd-414f-9535-e5739c0ed93f': 'https://images.unsplash.com/photo-1543508282-6319a3e2621f?w=700&h=500&fit=crop'
     };
     return imageMap[productId] || 'https://images.unsplash.com/photo-1542291026-7eec264c27ff?w=700&h=500&fit=crop';
 }
-
 function generateAllSizesForProduct(basePrice) {
     const allSizes = [];
     const sizeRange = ['6.5', '7', '7.5', '8', '8.5', '9', '9.5', '10', '10.5', '11', '11.5', '12', '12.5', '13', '13.5', '14', '15'];
@@ -262,7 +217,6 @@ function generateAllSizesForProduct(basePrice) {
     
     return allSizes;
 }
-
 async function refreshProducts() {
     const refreshIcon = elements.refreshBtn.querySelector('.refresh-icon');
     refreshIcon.classList.add('spinning');
@@ -291,7 +245,6 @@ function renderCatalog() {
         const data = __PRODUCT_CACHE[product.id];
         if (!data) return;
 
-        // CORRECCIÓN: Usar el precio mínimo disponible o regular price
         const availableSizes = data.sizes.filter(s => s.available);
         const minPrice = availableSizes.length > 0 
             ? Math.min(...availableSizes.map(s => s.price))
@@ -324,22 +277,28 @@ function renderCatalog() {
     });
 }
 
-function renderProductDetail(productKey) {
-    const data = __PRODUCT_CACHE[productKey];
+// Cambiar nombre de parámetro para claridad
+function goDetail(productId) {
+    elements.homeView.classList.remove('active');
+    elements.detailView.classList.add('active');
+    renderProductDetail(productId);
+}
+
+function renderProductDetail(productId) {
+    const data = __PRODUCT_CACHE[productId];
     if (!data) {
         goHome();
         return;
     }
     
-    __SELECTED_PRODUCT_SKU = productKey;
+    __SELECTED_PRODUCT_SKU = productId;
     __SELECTED_SIZE = null;
     
-    // Actualizar información del producto - USAR TÍTULO DE LA API
     elements.detailImage.src = data.image;
     elements.detailImage.alt = data.title;
-    elements.detailTitle.textContent = data.title; // CORRECCIÓN: Usar título de la API
+    elements.detailTitle.textContent = data.title;
     elements.lastUpdatedTime.textContent = formatDateTime(data.lastUpdated);
-    elements.productSku.textContent = data.sku;
+    elements.productSku.textContent = data.id; // Mostrar ID en lugar de SKU
     
     if (data._fallback) {
         elements.imageBadge.style.display = 'block';
@@ -441,12 +400,6 @@ function goHome() {
     elements.detailView.classList.remove('active');
     __SELECTED_PRODUCT_SKU = null;
     __SELECTED_SIZE = null;
-}
-
-function goDetail(sku) {
-    elements.homeView.classList.remove('active');
-    elements.detailView.classList.add('active');
-    renderProductDetail(sku);
 }
 
 // Event Handlers

@@ -4,7 +4,7 @@
 // Product Configuration - SOLO IDs (nombres se obtienen de la API)
 const PRODUCTS = [
     {
-        id: '94c1e4e1-1c99-44c4-9d81-672044e7f777'
+        id: 'f1938d29-48da-47eb-a5f8-619a2d8443ca'
     },
     {
         id: 'dbb27df3-bb6e-4a7a-ba38-1bbb5f5a022a'

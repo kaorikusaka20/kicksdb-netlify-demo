@@ -1,7 +1,7 @@
 // COURTS Sneaker Catalog App - StockX Integration
 // Muestra todas las tallas, pero solo habilita las disponibles
 
-// Product Configuration - MEJORADO: Usar IDs de StockX
+// Product Configuration - CORREGIDO: IDs y SKUs actualizados
 const PRODUCTS = [
     {
         name: 'Anta Kai 1 Jelly',
@@ -15,8 +15,8 @@ const PRODUCTS = [
     },
     {
         name: 'Anta Kai Hélà White',
-        id: '297427c6-73bd-414f-9535-e5739c0ed93f',
-        sku: '112511810S-1/1125A1810S-1/8125A1810S-1/112541810SF-1'
+        id: 'f1938d29-48da-47eb-a5f8-619a2d8443ca', // ID CORREGIDO
+        sku: '8125B1110S-3/112521110S-3/1125B1110S-3' // SKU CORREGIDO
     }
 ];
 
@@ -130,14 +130,16 @@ function showLoading(show = true) {
     elements.loadingOverlay.style.display = show ? 'flex' : 'none';
 }
 
-// API Functions
+// API Functions - CORREGIDO: Priorizar ID real
 async function fetchProductData(productId, sku) {
     try {
-        // Priorizar ID si está disponible, sino usar SKU
-        const queryParam = productId && productId !== 'TBD-PRODUCT-ID-2' && productId !== 'TBD-PRODUCT-ID-3' 
+        // CORRECCIÓN: Siempre usar ID si está disponible
+        const queryParam = productId 
             ? `id=${encodeURIComponent(productId)}` 
             : `sku=${encodeURIComponent(sku)}`;
             
+        console.log(`🔍 Fetching: ${queryParam}`);
+        
         const response = await fetch(`/.netlify/functions/kicksdb?${queryParam}&market=US`);
         
         if (!response.ok) {
@@ -160,12 +162,15 @@ async function loadAllProducts() {
     const loadPromises = PRODUCTS.map(async product => {
         try {
             const data = await fetchProductData(product.id, product.sku);
-            __PRODUCT_CACHE[product.id || product.sku] = data;
-            console.log(`✅ ${product.name}: ${data._source || 'Datos cargados'} - ${data.sizes.filter(s => s.available).length} tallas disponibles`);
+            const productKey = product.id || product.sku;
+            __PRODUCT_CACHE[productKey] = data;
+            
+            console.log(`✅ ${data.title}: ${data._source || 'Datos cargados'} - ${data.sizes.filter(s => s.available).length} tallas disponibles`);
             
         } catch (error) {
             console.error(`Failed to load ${product.name}:`, error);
-            __PRODUCT_CACHE[product.id || product.sku] = createEnhancedFallback(product);
+            const productKey = product.id || product.sku;
+            __PRODUCT_CACHE[productKey] = createEnhancedFallback(product);
             showToast(`Error cargando ${product.name} - Usando datos de respaldo`, 'warning');
         }
     });
@@ -187,14 +192,23 @@ function createEnhancedFallback(product) {
     
     return {
         sku: product.sku,
-        title: product.name,
-        image: 'https://images.unsplash.com/photo-1542291026-7eec264c27ff?w=700&h=500&fit=crop',
+        title: product.name, // Usar el nombre del producto como fallback
+        image: getProductImageById(product.id),
         lastUpdated: new Date().toISOString(),
         regularPrice: basePrice,
         sizes: generateAllSizesForProduct(basePrice),
         _fallback: true,
         _message: 'Datos de respaldo - StockX'
     };
+}
+
+function getProductImageById(productId) {
+    const imageMap = {
+        '94c1e4e1-1c99-44c4-9d81-672044e7f777': 'https://images.unsplash.com/photo-1543508282-6319a3e2621f?w=700&h=500&fit=crop&auto=format',
+        'dbb27df3-bb6e-4a7a-ba38-1bbb5f5a022a': 'https://images.unsplash.com/photo-1606107557195-0e29a4b5b4aa?w=700&h=500&fit=crop&auto=format',
+        'f1938d29-48da-47eb-a5f8-619a2d8443ca': 'https://images.unsplash.com/photo-1549298916-b41d501d3772?w=700&h=500&fit=crop&auto=format'
+    };
+    return imageMap[productId] || 'https://images.unsplash.com/photo-1542291026-7eec264c27ff?w=700&h=500&fit=crop';
 }
 
 function generateAllSizesForProduct(basePrice) {
@@ -245,8 +259,13 @@ function renderCatalog() {
         const data = __PRODUCT_CACHE[productKey];
         if (!data) return;
 
-        const displayPrice = data.regularPrice;
-        const availableSizes = data.sizes.filter(s => s.available).length;
+        // CORRECCIÓN: Usar el precio mínimo disponible o regular price
+        const availableSizes = data.sizes.filter(s => s.available);
+        const minPrice = availableSizes.length > 0 
+            ? Math.min(...availableSizes.map(s => s.price))
+            : data.regularPrice;
+        
+        const displayPrice = minPrice || data.regularPrice;
 
         const card = document.createElement('div');
         card.className = 'product-card';
@@ -262,8 +281,8 @@ function renderCatalog() {
             <div class="product-info">
                 <h3 class="product-name">${data.title}</h3>
                 <div class="product-price">
-                    <span class="price-amount">${formatPrice(displayPrice)}</span>
-                    <span class="available-sizes">${availableSizes} tallas disponibles</span>
+                    <span class="price-amount">Desde ${formatPrice(displayPrice)}</span>
+                    <span class="available-sizes">${availableSizes.length} tallas disponibles</span>
                 </div>
             </div>
         `;
@@ -283,22 +302,24 @@ function renderProductDetail(productKey) {
     __SELECTED_PRODUCT_SKU = productKey;
     __SELECTED_SIZE = null;
     
-    // Actualizar información del producto
+    // Actualizar información del producto - USAR TÍTULO DE LA API
     elements.detailImage.src = data.image;
     elements.detailImage.alt = data.title;
-    elements.detailTitle.textContent = data.title;
+    elements.detailTitle.textContent = data.title; // CORRECCIÓN: Usar título de la API
     elements.lastUpdatedTime.textContent = formatDateTime(data.lastUpdated);
     elements.productSku.textContent = data.sku;
     
     if (data._fallback) {
         elements.imageBadge.style.display = 'block';
         elements.imageBadge.querySelector('.badge-text').textContent = 'Modo Demo';
-    } else {
+    } else if (data._source) {
         elements.imageBadge.style.display = 'block';
         elements.imageBadge.querySelector('.badge-text').textContent = 'StockX API';
+    } else {
+        elements.imageBadge.style.display = 'none';
     }
     
-    // CORRECCIÓN: Mostrar precio inicial como "Selecciona una talla"
+    // Mostrar precio inicial como "Selecciona una talla"
     updateDetailPrice(null, true);
     
     // Renderizar TODAS las tallas (disponibles y no disponibles)
@@ -355,7 +376,7 @@ function selectSize(sizeData) {
     // Agregar selección actual
     event.target.closest('.size-button').classList.add('selected');
     
-    // CORRECCIÓN: Actualizar precio con el de la talla seleccionada
+    // Actualizar precio con el de la talla seleccionada
     updateDetailPrice(sizeData.price, false);
     
     // Habilitar botón de agregar al carrito
